@@ -2,9 +2,14 @@ import { dbGet, dbIndexAll, dbPut, eventsOfSession } from '../storage/db';
 import { opfsRead } from '../storage/opfs';
 import type { ReportRecord, ScreenshotItem, SessionRecord, TimelineEvent } from '../shared/types';
 import { defaultTitle, pngSize } from './model';
+import { sanitize } from '../shared/annotations';
+import { flatten } from '../ui/annotate-render';
 
 export interface LoadedShot extends ScreenshotItem {
+  /** What reports embed: the flattened annotated derivative (or the original when there are no annotations). */
   data: Uint8Array;
+  /** The immutable original screenshot. */
+  original: Uint8Array;
   width: number;
   height: number;
 }
@@ -23,8 +28,10 @@ export async function loadEvidence(sessionId: string): Promise<LoadedEvidence | 
   const shots: LoadedShot[] = [];
   for (const r of rows) {
     try {
-      const data = new Uint8Array(await (await opfsRead(r.file)).arrayBuffer());
-      shots.push({ ...r, data, ...pngSize(data) });
+      const original = new Uint8Array(await (await opfsRead(r.file)).arrayBuffer());
+      const annotations = sanitize(r.annotations);
+      const data = annotations.length ? await flatten(new Blob([original as BlobPart], { type: 'image/png' }), annotations) : original;
+      shots.push({ ...r, annotations, original, data, ...pngSize(original) });
     } catch {
       /* missing file: skipped rather than faked */
     }
