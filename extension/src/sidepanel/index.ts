@@ -1,6 +1,7 @@
 import { loadSamples, sampleSessionIds } from '../demo/sample';
 import { collecting, displayState, initialState } from '../shared/state';
-import { getSettings, saveSettings } from '../shared/settings';
+import { getPolicy, getSettings, onPolicyChanged, saveSettings } from '../shared/settings';
+import { NO_POLICY, lockedKeys, type Policy } from '../shared/policy';
 import { formatClock } from '../shared/filename';
 import { dbGet, dbGetAll, dbIndexAll, eventsOfSession } from '../storage/db';
 import { storageEstimate } from '../storage/opfs';
@@ -18,6 +19,9 @@ let health: HealthSnapshot | null = null;
 let notice: { text: string; level: string; at: number } | null = null;
 let sessions: SessionRecord[] = [];
 let sampleBusy = '';
+let policy: Policy = NO_POLICY;
+const isLocked = (k: keyof Settings) => lockedKeys(policy).includes(k);
+const lk = (k: keyof Settings) => (isLocked(k) ? ` <span class="lockfx">${icon('lock')}set by your organization</span>` : '');
 let codecInfo = '';
 let storageInfo = '';
 let remembered = false;
@@ -96,7 +100,7 @@ function render(): void {
 
     if (state.afk && state.afkNeedsResume) body += `<div class="section"><div class="actions">${tile('resumeFromAfk', 'play', 'Resume recording', 'You were away. The session does not restart on its own.', { primary: true })}</div></div>`;
     if (!active) {
-      body += `<div class="section"><div class="card" style="padding:16px"><div style="display:flex;gap:12px;align-items:flex-start"><span class="action__icon" style="width:38px;height:38px">${icon('mouse-pointer-click')}</span><div><div class="action__t" style="font-size:14px">Arm it on the app you test</div><p class="muted" style="margin-top:4px">Open the web app, then <b>click the ReproDesk icon in the toolbar</b>. Chrome only allows tab capture after that explicit action, so nothing can start silently.</p></div></div></div></div>`;
+      body += `<div class="section"><div class="card" style="padding:16px"><div style="display:flex;gap:12px;align-items:flex-start"><span class="action__icon" style="width:38px;height:38px">${icon('mouse-pointer-click')}</span><div><div class="action__t" style="font-size:14px">Arm it on the app you test</div><p class="muted" style="margin-top:4px">Open the web app, then <b>click the ReproDesk icon in the toolbar</b>. Chrome only allows tab capture after that explicit action, so nothing can start silently.${policy.allowedTargetOrigins ? ` <span class="faint">Your organization limits ReproDesk to: ${esc(policy.allowedTargetOrigins.join(', '))}.</span>` : ''}</p></div></div></div></div>`;
     } else if (term) {
       body += `<div class="section"><div class="actions"><button class="btn primary wide" data-c="ackTerminal" style="height:38px">Dismiss</button></div></div>`;
     } else if (repro) {
@@ -119,7 +123,7 @@ function render(): void {
     if (active && !term && !remembered) body += `<div class="remember">${icon('lock')}<span>Keep capturing across reloads &amp; SSO</span><button class="btn sm" id="remember">Remember site</button></div>`;
     body += recovered.map((s) => `<div class="recovered"><b>${icon('triangle-alert')}Recovered session</b><p class="small muted" style="margin:4px 0 9px">Recording ended unexpectedly. Last committed ${s.lastCommittedAt ? new Date(s.lastCommittedAt).toLocaleTimeString() : 'n/a'}.</p><div style="display:flex;gap:8px"><button class="btn sm primary" data-review="${s.id}">Review</button><button class="btn sm" data-del="${s.id}">Delete</button></div></div>`).join('');
     body += `<div class="section"><h2>Recent sessions <span class="count">${sessions.length ? `· ${sessions.length}` : ''}</span><span style="margin-left:auto;text-transform:none;letter-spacing:0"><button class="btn ghost sm" data-nav="all" style="height:22px;padding:0 6px">View all ${icon('external-link')}</button></span></h2>
-      ${sessions.length ? `<div class="sessions">${sessions.slice(0, 4).map(sessionRow).join('')}</div>` : `<div class="empty">${icon('film')}<b>No sessions yet</b><span class="small">Saved replays and Repro Sessions appear here.</span><button class="btn sm" id="load-sample" style="margin-top:10px" ${sampleBusy ? 'disabled' : ''}>${icon('sparkles')}${sampleBusy || 'Try with sample sessions'}</button></div>`}</div>`;
+      ${sessions.length ? `<div class="sessions">${sessions.slice(0, 4).map(sessionRow).join('')}</div>` : `<div class="empty">${icon('film')}<b>No sessions yet</b><span class="small">Saved replays and Repro Sessions appear here.</span>${policy.sampleSessions ? `<button class="btn sm" id="load-sample" style="margin-top:10px" ${sampleBusy ? 'disabled' : ''}>${icon('sparkles')}${sampleBusy || 'Try with sample sessions'}</button>` : ''}</div>`}</div>`;
   }
   const toast = notice && Date.now() - notice.at < 9000 ? `<div class="toast ${notice.level}">${icon(notice.level === 'info' ? 'info' : 'triangle-alert')}<span>${esc(notice.text)}</span></div>` : '';
   app.innerHTML = `<div class="panel">
@@ -144,32 +148,50 @@ function sessionRow(s: SessionRecord): string {
 }
 
 function seg(key: keyof Settings, values: Array<[number, string]>): string {
-  return `<div class="seg" role="group">${values.map(([v, l]) => `<button data-seg="${key}" data-v="${v}" class="${Number(settings[key]) === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  return `<div class="seg" role="group">${values.map(([v, l]) => `<button data-seg="${key}" data-v="${v}" class="${Number(settings[key]) === v ? 'on' : ''}" ${isLocked(key) ? 'disabled' : ''}>${l}</button>`).join('')}</div>`;
 }
-const sw = (key: keyof Settings, name: string) => `<label class="switch"><input type="checkbox" aria-label="${name}" data-sb="${key}" ${settings[key] ? 'checked' : ''}><span></span></label>`;
+const sw = (key: keyof Settings, name: string) => `<label class="switch"><input type="checkbox" aria-label="${name}" data-sb="${key}" ${settings[key] ? 'checked' : ''} ${isLocked(key) ? 'disabled' : ''}><span></span></label>`;
 const row = (t: string, s: string, ctl: string) => `<div class="setrow"><div><div class="t">${t}</div><div class="s">${s}</div></div>${ctl}</div>`;
+
+function managedRules(): string[] {
+  const out: string[] = [];
+  if (policy.allowedTargetOrigins) out.push(`ReproDesk can be armed only on: ${policy.allowedTargetOrigins.join(', ')}`);
+  if (policy.blockedOrigins.length) out.push(`Never on: ${policy.blockedOrigins.join(', ')}`);
+  if (policy.settings.captureVideo === false) out.push('Video capture is not allowed (Screenshot-only mode)');
+  if (policy.allowedExportFormats) out.push(`Exports limited to: ${policy.allowedExportFormats.map((f) => f.toUpperCase()).join(', ') || 'none'}`);
+  if (!policy.allowUnredactedOriginals) out.push('Unredacted original screenshots cannot be exported');
+  if (policy.requireExportConfirmation) out.push('Every export asks for confirmation');
+  if (policy.sessionRetentionDays) out.push(`Finished sessions are deleted after ${policy.sessionRetentionDays} days`);
+  return out;
+}
+
+function managedBanner(): string {
+  if (!policy.managed) return '';
+  const rules = managedRules();
+  return `<div class="callout managed" id="managed-banner">${icon('lock-keyhole')}<div><b>Managed by your organization.</b> Your administrator fixed some settings; they show a lock and cannot be changed here.${rules.length ? `<ul>${rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}</div></div>`;
+}
 
 function settingsView(): string {
   const h = health;
-  return `<div class="section" style="margin-top:4px"><h2>Capture</h2><div class="card drawer">
-    ${row('Replay window', 'How much is kept while Armed', seg('replaySec', [[30, '30s'], [60, '60s'], [90, '90s'], [120, '120s']]))}
-    ${row('Post-trigger tail', 'Recorded after you press Save', seg('tailSec', [[0, '0'], [3, '3s'], [5, '5s'], [10, '10s']]))}
-    ${row('Pre-session context', 'Kept before a Repro Session starts', seg('preSessionSec', [[0, 'Off'], [30, '30s']]))}
-    ${row('AFK suspend', 'After this idle time (locked = immediately)', seg('afkMinutes', [[0, 'Off'], [5, '5m'], [10, '10m'], [15, '15m'], [30, '30m']]))}
-    ${row('Marker screenshots', 'Capture a screenshot with every marker', sw('markerScreenshot', 'Marker screenshots'))}
-    ${row('Video capture', 'Off = Screenshot-only (applies when arming)', sw('captureVideo', 'Video capture'))}
+  return `${managedBanner()}<div class="section" style="margin-top:4px"><h2>Capture</h2><div class="card drawer">
+    ${row('Replay window', 'How much is kept while Armed' + lk('replaySec'), seg('replaySec', [[30, '30s'], [60, '60s'], [90, '90s'], [120, '120s']]))}
+    ${row('Post-trigger tail', 'Recorded after you press Save' + lk('tailSec'), seg('tailSec', [[0, '0'], [3, '3s'], [5, '5s'], [10, '10s']]))}
+    ${row('Pre-session context', 'Kept before a Repro Session starts' + lk('preSessionSec'), seg('preSessionSec', [[0, 'Off'], [30, '30s']]))}
+    ${row('AFK suspend', 'After this idle time (locked = immediately)' + lk('afkMinutes'), seg('afkMinutes', [[0, 'Off'], [5, '5m'], [10, '10m'], [15, '15m'], [30, '30m']]))}
+    ${row('Marker screenshots', 'Capture a screenshot with every marker' + lk('markerScreenshot'), sw('markerScreenshot', 'Marker screenshots'))}
+    ${row('Video capture', (policy.settings.captureVideo === false ? 'Forbidden: Screenshot-only mode' : 'Off = Screenshot-only (applies when arming)') + lk('captureVideo'), sw('captureVideo', 'Video capture'))}
     ${row('Open report after saving', 'Jump straight to Review', sw('openReviewAfterSave', 'Open report after saving'))}</div></div>
     <div class="section"><h2>Target profile</h2><div class="card drawer">
-    <div class="field" style="margin-top:10px"><label>Environment</label><input class="input" type="text" aria-label="Environment" data-s="environment" value="${esc(settings.environment)}"></div>
-    <div class="field"><label>Extra approved origins</label><input class="input" type="text" aria-label="Extra approved origins" data-s="approvedOrigins" value="${esc(settings.approvedOrigins.join(', '))}" placeholder="https://auth.example.com"><span class="hint">Comma separated. Same Target Profile, semantic scope only.</span></div></div></div>
+    <div class="field" style="margin-top:10px"><label>Environment</label><input class="input" type="text" aria-label="Environment" data-s="environment" value="${esc(settings.environment)}" ${isLocked('environment') ? 'disabled' : ''}>${isLocked('environment') ? `<span class="hint">${icon('lock')}set by your organization</span>` : ''}</div>
+    <div class="field"><label>Extra approved origins</label><input class="input" type="text" aria-label="Extra approved origins" data-s="approvedOrigins" value="${esc(settings.approvedOrigins.filter((o) => !policy.approvedOrigins.includes(o)).join(', '))}" placeholder="https://auth.example.com">${policy.approvedOrigins.length ? `<span class="hint">${icon('lock')}Added by your organization: ${esc(policy.approvedOrigins.join(', '))}</span>` : ''}<span class="hint">Comma separated. Same Target Profile, semantic scope only.</span></div></div></div>
     <div class="section"><h2>Quality</h2><div class="card drawer">
     ${row('Frame rate', 'Frames per second', seg('fps', [[5, '5'], [10, '10'], [15, '15'], [24, '24'], [30, '30']]))}
     ${row('Bitrate', 'Video quality vs. size', seg('bitrateKbps', [[600, '0.6'], [1000, '1'], [1500, '1.5'], [2500, '2.5'], [4000, '4']]))}</div></div>
     <div class="section"><h2>Shortcuts</h2><div class="card drawer">
     ${row('Save last replay', '', kbds(['Alt', 'Shift', 'R']))}${row('Add marker', '', kbds(['Alt', 'Shift', 'M']))}${row('Screenshot', '', kbds(['Alt', 'Shift', 'S']))}
     ${row('Start / finish session', 'Assign at chrome://extensions/shortcuts', '<span class="faint small">unassigned</span>')}</div></div>
-    <div class="section"><h2>Sample data</h2><div class="card drawer"><p class="muted small" style="margin:0 0 10px">A pre-recorded run of a demo shop (promo code ignored, order fails with E-4021). Use it to try the Review page, the blur / redact tools and every export without recording anything. It is labelled <b>Sample</b>, stays on this device and can be removed at any time.</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm primary" id="load-sample" ${sampleBusy ? 'disabled' : ''}>${icon('sparkles')}${sampleBusy || (sessions.some((x) => x.sample) ? 'Reload sample sessions' : 'Load sample sessions')}</button>${sessions.some((x) => x.sample) ? `<button class="btn sm" id="remove-sample" ${sampleBusy ? 'disabled' : ''}>${icon('trash-2')}Remove sample sessions</button>` : ''}</div></div></div>
+    ${policy.sampleSessions ? `<div class="section"><h2>Sample data</h2><div class="card drawer"><p class="muted small" style="margin:0 0 10px">A pre-recorded run of a demo shop (promo code ignored, order fails with E-4021). Use it to try the Review page, the blur / redact tools and every export without recording anything. It is labelled <b>Sample</b>, stays on this device and can be removed at any time.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm primary" id="load-sample" ${sampleBusy ? 'disabled' : ''}>${icon('sparkles')}${sampleBusy || (sessions.some((x) => x.sample) ? 'Reload sample sessions' : 'Load sample sessions')}</button>${sessions.some((x) => x.sample) ? `<button class="btn sm" id="remove-sample" ${sampleBusy ? 'disabled' : ''}>${icon('trash-2')}Remove sample sessions</button>` : ''}</div></div></div>` : ''}
     <div class="section"><h2>Diagnostics</h2><div class="card drawer"><div class="kv" style="margin-top:10px">
       <span>Frames encoded</span><span>${h?.framesEncoded ?? 0}</span><span>Dropped</span><span>${h?.framesDropped ?? 0}</span>
       <span>Stream</span><span>${h?.codec ? `${h.codec.startsWith('vp09') ? 'VP9' : h.codec} ${h.width}×${h.height}` : '-'}</span>
@@ -183,6 +205,7 @@ function diagText(): string {
     state: displayState(state).label, mode: state.mode, privacy: state.privacy, manual: state.manual, afk: state.afk,
     health: h ? { ...h, ageMs: Date.now() - h.at, ringBytesMB: +(h.ringBytes / 1048576).toFixed(2), writtenMB: +(h.bytesWritten / 1048576).toFixed(2) } : null,
     storage: storageInfo, encoders: codecInfo, serviceWorkerStarts: swStarts, chromeUA: navigator.userAgent,
+    policy: policy.managed ? { managed: true, locked: lockedKeys(policy), allowedTargetOrigins: policy.allowedTargetOrigins, blockedOrigins: policy.blockedOrigins, approvedOrigins: policy.approvedOrigins, allowedExportFormats: policy.allowedExportFormats, allowUnredactedOriginals: policy.allowUnredactedOriginals, requireExportConfirmation: policy.requireExportConfirmation, sessionRetentionDays: policy.sessionRetentionDays, sampleSessions: policy.sampleSessions } : { managed: false },
   }, null, 2);
 }
 
@@ -288,7 +311,7 @@ async function detectCodecs(): Promise<void> {
 /** Re-render only when something visible changed, so hover, focus and scroll are never disturbed by the 1 s poll. */
 function draw(): void {
   const d = effectiveDisplay();
-  const sig = JSON.stringify([state, d.code, view, Math.floor((health?.ringSegments ?? 0)), notice?.at, sessions.map((s) => [s.id, s.status, s.endedAt]), [...meta.entries()].map(([k, v]) => [k, v.markers, v.shots, !!v.thumb]), shotCount, remembered, settings, view === 'settings' ? [health?.framesEncoded, swStarts] : 0, notice && Date.now() - notice.at < 9000]);
+  const sig = JSON.stringify([policy, state, d.code, view, Math.floor((health?.ringSegments ?? 0)), notice?.at, sessions.map((s) => [s.id, s.status, s.endedAt]), [...meta.entries()].map(([k, v]) => [k, v.markers, v.shots, !!v.thumb]), shotCount, remembered, settings, view === 'settings' ? [health?.framesEncoded, swStarts] : 0, notice && Date.now() - notice.at < 9000]);
   if (sig !== lastSig) {
     lastSig = sig;
     render();
@@ -310,6 +333,8 @@ async function poll(): Promise<void> {
 
 async function main(): Promise<void> {
   settings = await getSettings();
+  policy = await getPolicy();
+  onPolicyChanged(() => void Promise.all([getSettings(), getPolicy()]).then(([st, po]) => { settings = st; policy = po; lastSig = ''; draw(); }));
   const r = await chrome.storage.session.get(['state', 'notice']);
   state = (r.state as CaptureState) ?? initialState();
   notice = (r.notice as typeof notice) ?? null;

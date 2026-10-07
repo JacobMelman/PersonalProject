@@ -64,5 +64,8 @@
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "storage": {
+    "managed_schema": "managed-schema.json"
   }
 }

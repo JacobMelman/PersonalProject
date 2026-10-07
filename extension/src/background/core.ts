@@ -1,7 +1,8 @@
 // Service-worker core. Every entry point (command, port message, tab event, alarm) runs through serial() so that
 // state transitions never interleave; the authoritative state lives in chrome.storage.session, never in globals.
 import { collecting, collectingSemantics, displayState, initialState, reduce, type StateEvent } from '../shared/state';
-import { getSettings } from '../shared/settings';
+import { getPolicy, getSettings } from '../shared/settings';
+import { evaluateTarget, isOriginBlocked, selectExpired } from '../shared/policy';
 import { isApprovedOrigin, minimizeUrl } from '../shared/privacy';
 import { FRAME_PORT_NAME, PORT_NAME, type ContentMessage, type OffscreenEvent, type OffscreenOp, type PinResult } from '../shared/messages';
 import type { CaptureState, HealthSnapshot, ScreenshotItem, SessionKind, SessionRecord, Settings, TimelineEvent } from '../shared/types';
@@ -53,8 +54,9 @@ export const browserName = (): string => {
 };
 
 async function approved(state: CaptureState): Promise<string[]> {
-  const s = await getSettings();
-  return [...(state.targetOrigin ? [state.targetOrigin] : []), ...s.approvedOrigins];
+  const [s, policy] = await Promise.all([getSettings(), getPolicy()]);
+  // An origin the administrator blocked is never part of the approved scope, so a page on it fails closed (Privacy Pause) even as the target.
+  return [...(state.targetOrigin ? [state.targetOrigin] : []), ...s.approvedOrigins].filter((o) => !isOriginBlocked(o, policy));
 }
 
 // ---------------------------------------------------------------- offscreen document
@@ -261,6 +263,11 @@ export async function armFromTab(tab: chrome.tabs.Tab): Promise<void> {
   if (tab.id == null || tab.windowId == null) return;
   if (!url) {
     await notify('This page cannot be a ReproDesk target (only http/https pages are supported; browser pages are never captured).', 'warn');
+    return;
+  }
+  const verdict = evaluateTarget(url.origin, await getPolicy());
+  if (!verdict.ok) {
+    await notify(verdict.message, 'warn');
     return;
   }
   const origins = state.targetOrigin ? [state.targetOrigin, ...settings.approvedOrigins] : [];
@@ -603,9 +610,36 @@ export async function resumeFromAfk(): Promise<void> {
   await reevaluate();
 }
 
+/** If the administrator changed the policy while capture is running, a target that is no longer allowed is disarmed at once. */
+export async function enforcePolicyNow(): Promise<void> {
+  const s = await getState();
+  if (s.mode === 'inactive' || s.terminal || !s.targetOrigin) return;
+  const verdict = evaluateTarget(s.targetOrigin, await getPolicy());
+  if (verdict.ok) return;
+  await systemEvent('Stopped by organization policy', verdict.message);
+  await disarm();
+  await notify(`ReproDesk was disarmed: ${verdict.message}`, 'warn');
+}
+
+/** Policy retention: finished sessions older than SessionRetentionDays are deleted (with their video, screenshots, events and reports). */
+export async function enforceRetention(force = false): Promise<number> {
+  const policy = await getPolicy();
+  if (policy.sessionRetentionDays <= 0) return 0;
+  const last = ((await chrome.storage.session.get('retentionAt')).retentionAt as number | undefined) ?? 0;
+  if (!force && Date.now() - last < 3_600_000) return 0;
+  await chrome.storage.session.set({ retentionAt: Date.now() });
+  const s = await getState();
+  const live = new Set([s.sessionId, s.shotSessionId].filter((x): x is string => !!x));
+  const expired = selectExpired(await dbGetAll<SessionRecord>('sessions'), Date.now(), policy.sessionRetentionDays).filter((x) => !live.has(x.id));
+  for (const rec of expired) await deleteSession(rec.id);
+  return expired.length;
+}
+
 export async function tick(): Promise<void> {
   const s = await getState();
   const settings = await getSettings();
+  await enforcePolicyNow();
+  await enforceRetention();
   await cleanupRingEvents(settings);
   if (s.mode === 'inactive' || s.terminal) {
     await cleanupRing(Date.now(), settings.replaySec * 1000 + 15_000);
@@ -641,6 +675,7 @@ export async function recover(): Promise<void> {
   const j = await dbGet<{ sessionId: string }>('journal', 'current');
   if (j && !(s.mode !== 'inactive' && (s.sessionId === j.sessionId || s.shotSessionId === j.sessionId))) await dbDelete('journal', 'current');
   await refreshBadge(s);
+  await enforceRetention(true);
 }
 
 export async function deleteSession(id: string): Promise<void> {

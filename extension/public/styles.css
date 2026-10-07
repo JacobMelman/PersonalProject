@@ -267,3 +267,10 @@ body.noscroll{overflow:hidden}
 
 .badge.accent{background:color-mix(in srgb,var(--brand) 16%,var(--surface));color:var(--brand-ink)}
 .callout.sample{border-color:color-mix(in srgb,var(--brand) 40%,var(--line));background:color-mix(in srgb,var(--brand) 8%,var(--surface))} .callout.sample .i{color:var(--brand)}
+
+/* ---------- managed by the organization ---------- */
+.callout.managed{border-color:color-mix(in srgb,var(--brand) 40%,var(--line));background:color-mix(in srgb,var(--brand) 8%,var(--surface));margin-bottom:12px}.callout.managed .i{color:var(--brand)}
+.callout.managed ul{margin:6px 0 0;padding-left:18px;color:var(--text-2)}
+.lockfx{display:inline-flex;align-items:center;gap:4px;margin-left:6px;color:var(--text-3);font-size:11px}.lockfx .i{font-size:12px}
+.seg button:disabled,.switch input:disabled+span{opacity:.55;cursor:not-allowed}
+.input:disabled{opacity:.7;cursor:not-allowed;background:var(--surface-2)}

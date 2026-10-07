@@ -18,6 +18,8 @@ import { hasRedaction } from '../shared/annotations';
 import type { SessionRecord, TimelineEvent, TimelineType } from '../shared/types';
 import { icon, type IconName } from '../ui/icons';
 import { logo } from '../ui/brand';
+import { getPolicy } from '../shared/settings';
+import { allowedFormats, type ExportFormat, type Policy } from '../shared/policy';
 import { ago, bytes, duration, esc, host } from '../ui/format';
 
 const app = document.getElementById('app')!;
@@ -57,6 +59,12 @@ async function detail(id: string): Promise<void> {
     return;
   }
   const ev: LoadedEvidence = loaded;
+  const policy: Policy = await getPolicy();
+  const okFormats = allowedFormats(policy);
+  const formats = FORMATS.filter((f) => okFormats.includes(f.id as ExportFormat));
+  const confirmExport = (): boolean =>
+    !policy.requireExportConfirmation ||
+    confirm('Your organization asks you to confirm before exporting.\n\nVideo and screenshots can show sensitive values that were visible in the tested application. Have you checked the evidence and hidden what must not leave this device?');
   let keepPre = ev.session.preContext?.kept ?? true;
   let video: MuxedVideo | null = null;
   let videoUrl = '';
@@ -140,10 +148,12 @@ async function detail(id: string): Promise<void> {
         ${m.steps.length ? `<ol class="steps">${m.steps.slice(0, 40).map((st) => `<li><span>${esc(st.text)}</span><span class="rel">${st.rel}</span></li>`).join('')}</ol>` : '<p class="muted small">No actions were recorded.</p>'}</section>
       ${markers.length ? `<section class="card panelcard"><h2>${icon('flag')}Markers</h2><div class="markers">${markers.map((e) => `<div class="markrow">${icon('flag')}<input class="input" type="text" aria-label="Marker label" data-marker="${e.id}" value="${esc(e.label ?? '')}"><span class="small faint num">${formatClock(Math.max(0, e.ts - s.startedAt))}</span></div>`).join('')}</div></section>` : ''}
       <section class="card panelcard"><h2>${icon('download')}Export</h2>
-        <div class="formats">${FORMATS.map((f) => `<label class="fmt"><input type="checkbox" data-fmt="${f.id}" ${f.on ? 'checked' : ''} aria-label="${f.name}">${icon(f.icon)}<b>${f.name}</b><span>${f.sub}</span><i class="tick">${icon('check')}</i></label>`).join('')}</div>
-        ${ev.shots.some((x) => x.annotations.length) ? `<div class="setrow" style="padding:12px 0 0;border:0"><div><div class="t">Include original screenshots</div><div class="s">Unredacted originals go into the ZIP only if you switch this on</div></div><label class="switch"><input type="checkbox" id="inc-orig"><span></span></label></div>` : ''}
+        ${policy.managed && (policy.allowedExportFormats || !policy.allowUnredactedOriginals || policy.requireExportConfirmation) ? `<p class="small faint" id="export-managed">${icon('lock')}Export options are set by your organization.</p>` : ''}
+        ${formats.length ? '' : `<p class="small" id="export-none" style="color:var(--red-ink)">${icon('triangle-alert')}Exporting is turned off by your organization.</p>`}
+        <div class="formats">${formats.map((f) => `<label class="fmt"><input type="checkbox" data-fmt="${f.id}" ${f.on ? 'checked' : ''} aria-label="${f.name}">${icon(f.icon)}<b>${f.name}</b><span>${f.sub}</span><i class="tick">${icon('check')}</i></label>`).join('')}</div>
+        ${policy.allowUnredactedOriginals && ev.shots.some((x) => x.annotations.length) ? `<div class="setrow" style="padding:12px 0 0;border:0"><div><div class="t">Include original screenshots</div><div class="s">Unredacted originals go into the ZIP only if you switch this on</div></div><label class="switch"><input type="checkbox" id="inc-orig"><span></span></label></div>` : ''}
         <div class="field" style="margin:14px 0 0"><label for="fname">File name</label><input class="input" type="text" id="fname" value="Bug-{date}_{time}"><span class="hint" id="fprev"></span></div>
-        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn primary" id="export" style="flex:1">${icon('download')}Export selected</button><button class="btn" id="cpmd">${icon('copy')}Markdown</button><button class="btn" id="cptxt">${icon('copy')}Text</button></div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">${formats.length ? `<button class="btn primary" id="export" style="flex:1">${icon('download')}Export selected</button>` : ''}${okFormats.includes('md') ? `<button class="btn" id="cpmd">${icon('copy')}Markdown</button>` : ''}${okFormats.includes('txt') ? `<button class="btn" id="cptxt">${icon('copy')}Text</button>` : ''}</div>
         <div class="exstatus" id="exstatus">${exportNote}</div></section>
     </div></div></div>
     <div class="lightbox" id="lightbox" hidden><img alt=""><button class="iconbtn" id="lbclose" aria-label="Close">${icon('x')}</button></div>`;
@@ -409,6 +419,7 @@ async function detail(id: string): Promise<void> {
       return model(over);
     };
     const copy = async (kind: 'md' | 'txt') => {
+      if (!confirmExport()) return;
       const mm = await rebuild();
       await navigator.clipboard.writeText(kind === 'md' ? renderMarkdown(mm) : renderTxt(mm));
       setStatus([`<div class="r okr">${icon('check')}Copied as ${kind === 'md' ? 'Markdown' : 'plain text'}</div>`]);
@@ -417,10 +428,11 @@ async function detail(id: string): Promise<void> {
       exportNote = rows.join('');
       document.getElementById('exstatus')!.innerHTML = exportNote;
     };
-    document.getElementById('cpmd')!.addEventListener('click', () => void copy('md'));
-    document.getElementById('cptxt')!.addEventListener('click', () => void copy('txt'));
+    document.getElementById('cpmd')?.addEventListener('click', () => void copy('md'));
+    document.getElementById('cptxt')?.addEventListener('click', () => void copy('txt'));
 
-    document.getElementById('export')!.addEventListener('click', async () => {
+    document.getElementById('export')?.addEventListener('click', async () => {
+      if (!confirmExport()) return;
       // Privacy edits: frames/events/screenshots inside cut ranges never reach any export; masks are burned into the re-encoded video.
       const cutsN = normalizeCuts(edits.cuts);
       const edited = hasEdits(edits) && !!video;
@@ -441,7 +453,7 @@ async function detail(id: string): Promise<void> {
         }
       }
       const mm = await rebuild({ events: keptEvents, shots: keptShots, video: exportVideo });
-      const fmts = [...document.querySelectorAll<HTMLInputElement>('[data-fmt]')].filter((c) => c.checked).map((c) => c.dataset.fmt!);
+      const fmts = [...document.querySelectorAll<HTMLInputElement>('[data-fmt]')].filter((c) => c.checked).map((c) => c.dataset.fmt!).filter((f) => okFormats.includes(f as ExportFormat));
       if (!fmts.length) return setStatus([`<div class="r bad">${icon('triangle-alert')}Select at least one format.</div>`]);
       const used = new Set<string>();
       const results: string[] = [];
@@ -456,7 +468,7 @@ async function detail(id: string): Promise<void> {
           else if (f === 'xlsx') blob = renderXlsx(mm);
           else {
             const extraFiles: Record<string, Uint8Array> = {};
-            if ((document.getElementById('inc-orig') as HTMLInputElement | null)?.checked) {
+            if (policy.allowUnredactedOriginals && (document.getElementById('inc-orig') as HTMLInputElement | null)?.checked) {
               for (const sh of ev.shots) {
                 const ref = mm.screenshots.find((x) => x.id === sh.id);
                 if (ref && sh.annotations.length) extraFiles[ref.filename.replace('screenshots/', 'screenshots/originals/')] = sh.original;

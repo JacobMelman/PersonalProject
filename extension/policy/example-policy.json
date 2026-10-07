@@ -1,0 +1,17 @@
+{
+  "AllowedTargetOrigins": ["https://*.staging.example.com", "https://staging-sso.example.com", "http://localhost:*"],
+  "BlockedOrigins": ["https://hr.example.com", "https://payroll.example.com"],
+  "ApprovedOrigins": ["https://staging-sso.example.com"],
+  "ReplayWindowSec": 60,
+  "PostTriggerTailSec": 5,
+  "PreSessionContextSec": 30,
+  "AfkAutoPauseMinutes": 10,
+  "MarkerScreenshots": true,
+  "VideoCaptureAllowed": true,
+  "EnvironmentLabel": "QA staging",
+  "AllowedExportFormats": ["zip", "html", "docx", "md"],
+  "AllowUnredactedOriginals": false,
+  "RequireExportConfirmation": true,
+  "SessionRetentionDays": 30,
+  "SampleSessionsEnabled": false
+}

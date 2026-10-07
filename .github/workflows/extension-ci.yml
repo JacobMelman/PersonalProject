@@ -81,6 +81,8 @@ jobs:
       - name: System tools (virtual display, window manager, input, media)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb openbox xdotool imagemagick ffmpeg x11-utils python3-pil
       - run: npx playwright install --with-deps chromium
+      - name: Managed-policy directory (the policy suite writes a real Chromium policy file here)
+        run: sudo mkdir -p /etc/chromium/policies/managed && sudo chmod -R a+rwX /etc/chromium/policies
       - name: Real-browser suites
         run: |
           export CHROME_BIN="$(node -e "console.log(require('playwright').chromium.executablePath())")"

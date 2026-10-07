@@ -1,12 +1,11 @@
 import {
-  addMarker, armFromTab, deleteSession, disarm, dispatch, finishRepro, finishShotSession, getState, injectContent, notify, onIdleState,
+  addMarker, armFromTab, deleteSession, disarm, dispatch, enforcePolicyNow, enforceRetention, finishRepro, finishShotSession, getState, injectContent, notify, onIdleState,
   onOffscreenEvent, onPort, onTabRemoved, onTabUpdated, openReview, recover, refreshBadge, reevaluate, resumeFromAfk, saveReplay,
   serial, startRepro, takeScreenshot, tick,
 } from './core';
 import type { CommandMessage, OffscreenEvent } from '../shared/messages';
-import { getSettings } from '../shared/settings';
+import { getSettings, onPolicyChanged, saveSettings } from '../shared/settings';
 import { minimizeUrl } from '../shared/privacy';
-import type { Settings } from '../shared/types';
 import { isOwnExtensionPage, isRememberableOrigin } from '../shared/trust';
 
 // User invocation of the extension (toolbar icon) is what grants activeTab, which tabCapture requires.
@@ -85,22 +84,26 @@ async function registerRememberedSite(origin: string): Promise<void> {
     await chrome.scripting.registerContentScripts([{ id, matches: [`${origin}/*`], js: ['content.js'], runAt: 'document_start', allFrames: true, persistAcrossSessions: true }]);
   }
   const s = await getSettings();
-  if (!s.approvedOrigins.includes(origin)) await chrome.storage.local.set({ settings: { ...s, approvedOrigins: [...s.approvedOrigins, origin] } });
+  if (!s.approvedOrigins.includes(origin)) await saveSettings({ approvedOrigins: [...s.approvedOrigins, origin] });
   const st = await getState();
   if (st.targetTabId != null) await injectContent(st.targetTabId);
   await notify(`Site remembered: ${origin}`, 'info');
 }
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !changes.settings) return;
-  const next = changes.settings.newValue as Settings;
+// Settings or policy changed: re-read the effective settings, re-apply idle/capture config, and drop a target the policy no longer allows.
+const applySettingsChange = () =>
   void serial(async () => {
+    const next = await getSettings();
+    await enforcePolicyNow();
     const s = await getState();
     if (s.mode === 'inactive') return;
     await chrome.idle.setDetectionInterval(Math.max(15, (next.afkMinutes || 10) * 60));
     await chrome.runtime.sendMessage({ kind: 'off', op: 'config', settings: next }).catch(() => undefined);
   });
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.settings) applySettingsChange();
 });
+onPolicyChanged(applySettingsChange);
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => undefined);
@@ -130,6 +133,7 @@ if (__E2E__) {
     disarm: () => serial(disarm),
     dispatch: (e: Parameters<typeof dispatch>[0]) => serial(() => dispatch(e)),
     reevaluate: () => serial(reevaluate),
+    retention: () => serial(() => enforceRetention(true)),
     minimizeUrl,
   };
 }

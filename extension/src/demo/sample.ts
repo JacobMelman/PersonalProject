@@ -1,6 +1,7 @@
 // "Sample sessions": a pre-recorded, scripted run of a demo shop that can be loaded into the local store, so a reviewer or presenter
 // can try the Review page, the redaction tools and every export without recording anything first. Sample data is always labelled
 // (SessionRecord.sample) and can be removed again; it never touches real evidence.
+import { getPolicy } from '../shared/settings';
 import { dbGetAll, dbPut, dbPutMany } from '../storage/db';
 import { opfsWrite } from '../storage/opfs';
 import { decodeSegment, encodeSegment, segPath } from '../storage/segments';
@@ -27,6 +28,7 @@ export async function sampleSessionIds(): Promise<string[]> {
 
 /** Loads the bundled sample sessions, re-dated so the newest one ended about two minutes ago. Any earlier sample copy is replaced. */
 export async function loadSamples(removeOne: (id: string) => Promise<void>): Promise<string[]> {
+  if (!(await getPolicy()).sampleSessions) throw new Error('Sample sessions are turned off by your organization.');
   for (const id of await sampleSessionIds()) await removeOne(id);
   const res = await fetch(base() + 'index.json');
   if (!res.ok) throw new Error('The sample data is missing from this build.');
