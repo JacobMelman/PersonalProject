@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Fixture shop</title>
+<style>body{font:16px system-ui;margin:20px} nav a{margin-right:12px} canvas{border:1px solid #888;display:block;margin:12px 0}</style></head>
+<body>
+<nav><a href="/" data-link id="nav-home">Home</a><a href="/cart" data-link id="nav-cart">Cart</a><a href="/profile" data-link id="nav-profile">Profile</a></nav>
+<h1 id="title">Home</h1>
+<canvas id="c" width="480" height="160"></canvas>
+<section id="view"></section>
+<iframe id="frame" srcdoc="<button id='inner'>Inside iframe</button>" width="300" height="60"></iframe>
+<script>
+const views = {
+  '/': '<button id="add" data-testid="add-to-cart">Add to cart</button> <button id="popup">Open popup</button>',
+  '/cart': '<p>Cart for jane.doe@bank.example, card 4111 1111 1111 1111</p><button id="checkout">Checkout</button>',
+  '/profile': '<form id="f"><label for="user">Username</label><input id="user" name="user"><label for="pw">Password</label><input id="pw" type="password" name="pw"><label for="note">Note</label><textarea id="note"></textarea><div id="ce" contenteditable="true">editable text</div><button type="submit" id="save">Save profile</button></form>',
+};
+function render(){ const p=location.pathname; document.getElementById('title').textContent = p==='/'?'Home':p.slice(1); document.getElementById('view').innerHTML = views[p] || '<p>404</p>'; }
+document.addEventListener('click', e => { const a=e.target.closest('[data-link]'); if(a){ e.preventDefault(); history.pushState({}, '', a.getAttribute('href')+'?token=SECRETQUERY#frag'); render(); } });
+document.addEventListener('submit', e => e.preventDefault());
+addEventListener('popstate', render); render();
+const ctx = document.getElementById('c').getContext('2d'); let t=0;
+(function draw(){ t++; ctx.fillStyle='#fff'; ctx.fillRect(0,0,480,160); ctx.fillStyle='hsl('+(t*3%360)+',80%,50%)'; ctx.fillRect((t*4)%440,40,40,40); ctx.fillStyle='#000'; ctx.fillText('frame '+t,10,20); requestAnimationFrame(draw); })();
+document.addEventListener('click', e => { if(e.target.id==='popup') window.open('/popup.html','_blank'); });
+</script></body></html>

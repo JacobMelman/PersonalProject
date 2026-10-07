@@ -1,0 +1,29 @@
+{
+  "name": "reprodesk-extension",
+  "version": "0.0.1",
+  "private": true,
+  "description": "ReproDesk Phase 0 browser spike build (Chrome MV3)",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:e2e": "E2E=1 node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "E2E=1 node build.mjs && node tests/e2e/run.mjs && node tests/e2e/exports.mjs && node tests/e2e/recovery.mjs",
+    "package": "node scripts/package.mjs",
+    "demo": "node scripts/demo.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.4",
+    "@types/node": "^26.6.4",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.56.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "docx": "^9.9.0",
+    "fflate": "^0.8.3",
+    "mediabunny": "^1.61.3"
+  }
+}

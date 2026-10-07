@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "ReproDesk (Phase 0 spike)",
+  "short_name": "ReproDesk",
+  "version": "0.0.1",
+  "description": "Privacy-first bug capture for enterprise web QA. Phase 0 engineering spike build - not a product release.",
+  "minimum_chrome_version": "116",
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "action": {
+    "default_title": "ReproDesk: click to arm on this tab",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" }
+  },
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "permissions": ["tabCapture", "activeTab", "offscreen", "sidePanel", "storage", "unlimitedStorage", "idle", "scripting", "alarms"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "commands": {
+    "save-last-replay": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Save last replay (Instant Replay)"
+    },
+    "add-marker": {
+      "suggested_key": { "default": "Alt+Shift+M" },
+      "description": "Add a marker to the current Repro Session"
+    },
+    "take-screenshot": {
+      "suggested_key": { "default": "Alt+Shift+S" },
+      "description": "Take a screenshot of the approved target"
+    },
+    "toggle-repro": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "Start / finish a Repro Session"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
