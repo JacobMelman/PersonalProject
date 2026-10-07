@@ -79,7 +79,7 @@ jobs:
           cache-dependency-path: extension/package-lock.json
       - run: npm ci
       - name: System tools (virtual display, window manager, input, media)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb openbox xdotool imagemagick ffmpeg x11-utils
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb openbox xdotool imagemagick ffmpeg x11-utils python3-pil
       - run: npx playwright install --with-deps chromium
       - name: Real-browser suites
         run: |
