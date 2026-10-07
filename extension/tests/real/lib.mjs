@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 export const root = path.dirname(fileURLToPath(import.meta.url));
 export const proj = path.resolve(root, '../..');
-export const dist = path.join(proj, 'dist');
+export const dist = process.env.RD_DIST || path.join(proj, 'dist'); // RD_DIST lets a long soak run from a copy while dist/ is rebuilt
 export const keyInfo = JSON.parse(readFileSync(path.join(proj, 'manifest.key.json'), 'utf8'));
 export const CHROME = process.env.CHROME_BIN || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 export const DISPLAY = process.env.RD_DISPLAY || ':99';

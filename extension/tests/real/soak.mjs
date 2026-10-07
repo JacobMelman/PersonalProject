@@ -6,7 +6,7 @@ import { startSites } from './site.mjs';
 import { makeProbe } from './probe.mjs';
 import path from 'node:path';
 import { mkdirSync, writeFileSync, readFileSync, readFileSync as rf, statSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { unzipSync } from 'fflate';
 
 const mode = process.argv[2] ?? 'armed';
@@ -71,12 +71,18 @@ try {
     if (mode === 'repro') {
       if (step % 6 === 0) { await panel.eval(`document.querySelector('[data-c="marker"]') && document.querySelector('[data-c="marker"]').click()`); markers++; }
       if (step % 14 === 7) { // privacy pause: user looks at another tab for ~40 s
-        const b = await (await import('./lib.mjs')).browserCdp(PORT);
+        const lib = await import('./lib.mjs');
+        const b = await lib.browserCdp(PORT);
         const { targetId } = await b.send('Target.createTarget', { url: 'about:blank' }); b.close();
         pauses++;
         await sleep(40000);
-        const b2 = await (await import('./lib.mjs')).browserCdp(PORT); await b2.send('Target.closeTarget', { targetId }); b2.close();
-        await sleep(2500);
+        const b2 = await lib.browserCdp(PORT);
+        await b2.send('Target.closeTarget', { targetId });
+        // Chrome activates a neighbouring tab (here the probe), not necessarily the target: like a user, go back to the tested tab.
+        const fix = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).find((t) => t.type === 'page' && t.url.startsWith(`http://localhost:${SITE}/`));
+        if (fix) await b2.send('Target.activateTarget', { targetId: fix.id });
+        b2.close();
+        await sleep(3500);
       }
     }
     const segs = await probe.dump('segments');
@@ -147,9 +153,8 @@ try {
       const t = Math.max(1, dur - 5);
       let seekOk = true; try { execFileSync('ffmpeg', ['-y', '-v', 'error', '-ss', String(t), '-i', webm, '-frames:v', '1', path.join(OUT, 'last-frame.png')]); } catch { seekOk = false; }
       ok('the end of the video is seekable and decodable', seekOk);
-      let decodeErr = '';
-      try { decodeErr = execFileSync('ffmpeg', ['-v', 'error', '-i', webm, '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'], maxBuffer: 1 << 26 }).toString(); } catch (e) { decodeErr = String(e.stderr ?? e); }
-      ok('full decode of the 31-minute video reports no errors (integrity)', decodeErr.trim() === '', decodeErr.slice(0, 160));
+      const dec = spawnSync('ffmpeg', ['-v', 'error', '-i', webm, '-f', 'null', '-'], { encoding: 'utf8', maxBuffer: 1 << 26 });
+      ok('full decode of the whole video reports no errors (integrity)', dec.status === 0 && (dec.stderr ?? '').trim() === '', (dec.stderr ?? '').slice(0, 160));
       const man = JSON.parse(Buffer.from(z['manifest.json']).toString());
       ok('manifest lists capture gaps for the pauses', (man.video?.gaps?.length ?? 0) >= pauses, `${man.video?.gaps?.length ?? 0} gaps for ${pauses} pauses`);
     }

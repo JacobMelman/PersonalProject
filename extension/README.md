@@ -36,6 +36,8 @@ npm run build        # release build -> dist/ (load this folder as an unpacked e
 npm run typecheck
 npm test             # unit tests
 npm run test:e2e     # builds the E2E variant and runs the Playwright suites (needs Chromium from Playwright 1.56)
+npm run test:real    # real-browser suites (headed Chromium under Xvfb, real input) - see below
+npm run soak:armed   # 40 min bounded-ring soak            npm run soak:repro   # 31 min Repro Session soak
 npm run package      # release build zipped to releases/
 npm run demo -- --url https://example.com --steps scripts/demo-steps.example.mjs   # dogfood launcher
 ```
@@ -45,3 +47,11 @@ The E2E build differs from the release build only by a test hook in the service 
 Release builds contain no test hook.
 
 The extension id is stable (`manifest.key.json` holds only the public key) so unpacked installs always get the same id.
+
+## Real-browser suites (`tests/real`)
+
+They launch headed Chromium under Xvfb + openbox and drive it with `xdotool` (real mouse, keyboard, toolbar click) and a raw CDP client attached to page targets only.
+Prerequisites on a Linux box: `apt-get install -y xvfb openbox xdotool xterm imagemagick ffmpeg`, `pip install pillow`, Playwright 1.56's Chromium
+(`/opt/pw-browsers`) or `CHROME_BIN=/path/to/chrome`. Run suites in parallel by giving each its own `RD_DISPLAY`, `RD_PORT` and `RD_SITE`.
+`RD_DIST=/tmp/copy` runs a suite from a copy of `dist/`, so a long soak is not disturbed by a rebuild. `.claude/agents/reprodesk-verifier.md` describes an agent
+that runs the whole ladder and reports.
