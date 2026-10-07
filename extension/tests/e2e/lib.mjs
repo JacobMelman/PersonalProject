@@ -45,12 +45,12 @@ export function rmProfile(dir) {
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 }
 
-export async function launch(userData) {
+export async function launch(userData, opts = {}) {
   const ctx = await chromium.launchPersistentContext(userData, {
     headless: process.env.HEADED !== '1',
     channel: 'chromium',
     args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`, `--allowlisted-extension-id=${keyInfo.id}`, '--no-first-run', '--autoplay-policy=no-user-gesture-required'],
-    viewport: { width: 1000, height: 700 },
+    viewport: opts.viewport ?? { width: 1000, height: 700 },
     acceptDownloads: true,
   });
   if (!ctx.serviceWorkers()[0]) await ctx.waitForEvent('serviceworker');

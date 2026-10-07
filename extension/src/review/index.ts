@@ -46,7 +46,7 @@ async function list(): Promise<void> {
   app.innerHTML = `<div class="page">${topbar('')}
     <div class="pagehead"><div><h1>Sessions</h1><p class="muted" style="margin-top:4px">${rows.length} saved on this device · nothing leaves your browser until you export</p></div></div>
     ${rows.length ? `<div class="cards">${rows.map((s, i) => `<a class="scard" href="?session=${encodeURIComponent(s.id)}"><div class="cover ${s.kind}">${thumbs[i] ? `<img src="${thumbs[i]}" alt="">` : icon(KIND_ICON[s.kind] ?? 'video')}</div>
-      <div class="body"><b>${SESSION_TYPE[s.kind] ?? s.kind}</b><div class="small muted">${esc(host(s.targetOrigin))} · ${ago(s.createdAt)}</div><div class="chips">${statusBadge(s)}<span class="badge">${s.endedAt ? duration(s.endedAt - s.startedAt) : 'live'}</span><span class="badge">${esc(s.environment)}</span></div></div></a>`).join('')}</div>`
+      <div class="body"><b>${SESSION_TYPE[s.kind] ?? s.kind}</b><div class="small muted">${esc(host(s.targetOrigin))} · ${ago(s.createdAt)}</div><div class="chips">${statusBadge(s)}<span class="badge">${s.endedAt ? duration(s.endedAt - s.startedAt) : 'live'}</span><span class="badge">${esc(s.environment)}</span>${s.sample ? '<span class="badge accent">Sample</span>' : ''}</div></div></a>`).join('')}</div>`
       : `<div class="empty" style="padding:60px">${icon('film')}<b>No sessions yet</b><span>Arm ReproDesk on the app you test, then save a replay or start a Repro Session.</span></div>`}</div>`;
 }
 
@@ -103,6 +103,7 @@ async function detail(id: string): Promise<void> {
       <div class="meta">${statusBadge(s)}<span class="chip">${icon(KIND_ICON[s.kind] ?? 'video')}${esc(m.sessionType)}</span><span class="chip">${icon('globe')}${esc(host(s.targetOrigin))}</span><span class="chip">${icon('layers')}${esc(s.environment)}</span><span class="chip">${icon('monitor')}${esc(s.browser)}</span><span class="chip">${icon('clock')}${new Date(s.startedAt).toLocaleString()}</span></div></div>
       <button class="btn danger sm" id="del">${icon('trash-2')}Delete session</button></div>
     ${m.endNote ? `<div class="callout bad">${icon('triangle-alert')}<div>${esc(m.endNote)}</div></div>` : ''}
+    ${ev.session.sample ? `<div class="callout sample">${icon('sparkles')}<div><b>Sample session.</b> A pre-recorded, scripted run of a demo shop, not real evidence. Try the blur / redact tools and the exports freely; remove it any time under Settings → Sample data in the side panel.</div></div>` : ''}
     <div class="callout">${icon('eye-off')}<div><b>Check before sharing.</b> Values visible in the tested application may appear in video and screenshots even though typed values are never collected. Inspect before sharing. Evidence stays on this device until you export it.</div></div>
     ${s.status === 'target_ended' || s.status === 'recovered' ? `<div class="panelcard card" style="margin-bottom:20px"><div class="field" style="margin:0"><label>Outcome classification</label><select class="input" id="cls">${classOpts.map((c) => `<option ${c === (s.classification ?? '') ? 'selected' : ''}>${c}</option>`).join('')}</select></div><div class="field" style="margin:12px 0 0"><label>Comment</label><input class="input" type="text" id="clsnote" value="${esc(s.classificationNote ?? '')}"></div></div>` : ''}
     <div class="stats">

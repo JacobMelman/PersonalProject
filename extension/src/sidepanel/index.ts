@@ -1,3 +1,4 @@
+import { loadSamples, sampleSessionIds } from '../demo/sample';
 import { collecting, displayState, initialState } from '../shared/state';
 import { getSettings, saveSettings } from '../shared/settings';
 import { formatClock } from '../shared/filename';
@@ -16,6 +17,7 @@ let settings: Settings;
 let health: HealthSnapshot | null = null;
 let notice: { text: string; level: string; at: number } | null = null;
 let sessions: SessionRecord[] = [];
+let sampleBusy = '';
 let codecInfo = '';
 let storageInfo = '';
 let remembered = false;
@@ -117,7 +119,7 @@ function render(): void {
     if (active && !term && !remembered) body += `<div class="remember">${icon('lock')}<span>Keep capturing across reloads &amp; SSO</span><button class="btn sm" id="remember">Remember site</button></div>`;
     body += recovered.map((s) => `<div class="recovered"><b>${icon('triangle-alert')}Recovered session</b><p class="small muted" style="margin:4px 0 9px">Recording ended unexpectedly. Last committed ${s.lastCommittedAt ? new Date(s.lastCommittedAt).toLocaleTimeString() : 'n/a'}.</p><div style="display:flex;gap:8px"><button class="btn sm primary" data-review="${s.id}">Review</button><button class="btn sm" data-del="${s.id}">Delete</button></div></div>`).join('');
     body += `<div class="section"><h2>Recent sessions <span class="count">${sessions.length ? `· ${sessions.length}` : ''}</span><span style="margin-left:auto;text-transform:none;letter-spacing:0"><button class="btn ghost sm" data-nav="all" style="height:22px;padding:0 6px">View all ${icon('external-link')}</button></span></h2>
-      ${sessions.length ? `<div class="sessions">${sessions.slice(0, 4).map(sessionRow).join('')}</div>` : `<div class="empty">${icon('film')}<b>No sessions yet</b><span class="small">Saved replays and Repro Sessions appear here.</span></div>`}</div>`;
+      ${sessions.length ? `<div class="sessions">${sessions.slice(0, 4).map(sessionRow).join('')}</div>` : `<div class="empty">${icon('film')}<b>No sessions yet</b><span class="small">Saved replays and Repro Sessions appear here.</span><button class="btn sm" id="load-sample" style="margin-top:10px" ${sampleBusy ? 'disabled' : ''}>${icon('sparkles')}${sampleBusy || 'Try with sample sessions'}</button></div>`}</div>`;
   }
   const toast = notice && Date.now() - notice.at < 9000 ? `<div class="toast ${notice.level}">${icon(notice.level === 'info' ? 'info' : 'triangle-alert')}<span>${esc(notice.text)}</span></div>` : '';
   app.innerHTML = `<div class="panel">
@@ -137,7 +139,7 @@ function sessionRow(s: SessionRecord): string {
   const dur = s.endedAt ? duration(s.endedAt - s.startedAt) : 'live';
   const counts = `${m?.markers ? `<span>${icon('flag')}${m.markers}</span>` : ''}${m?.shots ? `<span>${icon('camera')}${m.shots}</span>` : ''}`;
   return `<div class="session"><div class="thumb ${s.kind}">${m?.thumb ? `<img src="${m.thumb}" alt="">` : icon(k.icon)}</div>
-    <div class="session__body"><div class="session__t"><span>${k.name}</span>${statusBadge(s)}</div><div class="session__m"><span>${ago(s.createdAt)}</span><span class="dotsep">·</span><span class="num">${dur}</span>${counts}</div></div>
+    <div class="session__body"><div class="session__t"><span>${k.name}</span>${statusBadge(s)}${s.sample ? '<span class="badge">Sample</span>' : ''}</div><div class="session__m"><span>${ago(s.createdAt)}</span><span class="dotsep">·</span><span class="num">${dur}</span>${counts}</div></div>
     <div class="session__act"><button class="iconbtn" data-review="${s.id}" title="Open report" aria-label="Open report">${icon('external-link')}</button><button class="iconbtn" data-del="${s.id}" title="Delete" aria-label="Delete">${icon('trash-2')}</button></div></div>`;
 }
 
@@ -166,6 +168,8 @@ function settingsView(): string {
     <div class="section"><h2>Shortcuts</h2><div class="card drawer">
     ${row('Save last replay', '', kbds(['Alt', 'Shift', 'R']))}${row('Add marker', '', kbds(['Alt', 'Shift', 'M']))}${row('Screenshot', '', kbds(['Alt', 'Shift', 'S']))}
     ${row('Start / finish session', 'Assign at chrome://extensions/shortcuts', '<span class="faint small">unassigned</span>')}</div></div>
+    <div class="section"><h2>Sample data</h2><div class="card drawer"><p class="muted small" style="margin:0 0 10px">A pre-recorded run of a demo shop (promo code ignored, order fails with E-4021). Use it to try the Review page, the blur / redact tools and every export without recording anything. It is labelled <b>Sample</b>, stays on this device and can be removed at any time.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm primary" id="load-sample" ${sampleBusy ? 'disabled' : ''}>${icon('sparkles')}${sampleBusy || (sessions.some((x) => x.sample) ? 'Reload sample sessions' : 'Load sample sessions')}</button>${sessions.some((x) => x.sample) ? `<button class="btn sm" id="remove-sample" ${sampleBusy ? 'disabled' : ''}>${icon('trash-2')}Remove sample sessions</button>` : ''}</div></div></div>
     <div class="section"><h2>Diagnostics</h2><div class="card drawer"><div class="kv" style="margin-top:10px">
       <span>Frames encoded</span><span>${h?.framesEncoded ?? 0}</span><span>Dropped</span><span>${h?.framesDropped ?? 0}</span>
       <span>Stream</span><span>${h?.codec ? `${h.codec.startsWith('vp09') ? 'VP9' : h.codec} ${h.width}×${h.height}` : '-'}</span>
@@ -183,7 +187,7 @@ function diagText(): string {
 }
 
 app.addEventListener('click', async (e) => {
-  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c],[data-review],[data-del],[data-nav],[data-seg],#remember,#copydiag');
+  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c],[data-review],[data-del],[data-nav],[data-seg],#remember,#copydiag,#load-sample,#remove-sample');
   if (!t) return;
   if (t.dataset.c) {
     if (t.dataset.c === 'marker') {
@@ -219,6 +223,23 @@ app.addEventListener('click', async (e) => {
       render();
     }
   } else if (t.id === 'copydiag') void navigator.clipboard.writeText(diagText());
+  else if (t.id === 'load-sample' || t.id === 'remove-sample') {
+    const removeOne = (id: string) => chrome.runtime.sendMessage({ kind: 'delete-session', id }).then(() => undefined);
+    sampleBusy = t.id === 'load-sample' ? 'Loading…' : 'Removing…';
+    lastSig = '';
+    render();
+    try {
+      if (t.id === 'load-sample') await loadSamples(removeOne);
+      else for (const id of await sampleSessionIds()) await removeOne(id);
+    } catch (err) {
+      notice = { text: `Sample data: ${err instanceof Error ? err.message : String(err)}`, level: 'error', at: Date.now() };
+    } finally {
+      sampleBusy = '';
+      await refreshSessions();
+      lastSig = '';
+      render();
+    }
+  }
 });
 app.addEventListener('change', async (e) => {
   const el = e.target as HTMLInputElement;

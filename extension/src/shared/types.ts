@@ -104,6 +104,8 @@ export interface SessionRecord {
   /** Privacy edits applied to the replay on export (masks over time ranges, cut-outs). The stored evidence is never modified. */
   videoEdits?: VideoEdits;
   reviewedAt?: number;
+  /** Bundled sample data (a scripted run of a demo shop), never real evidence. Labelled in the UI and removable. */
+  sample?: boolean;
 }
 
 export type TimelineType =
