@@ -29,7 +29,7 @@ decoder errors. The check now asserts exactly that (decoder errors = 0, frame co
 **Armed, 40 min, replay window 30 s, animated page** (`soak/armed-timeseries.csv`):
 * ring held 16-20 GOP segments (max 0.7 MB) for the whole run; OPFS file count always equalled the index (0 orphans except transient 2)
 * storage usage 1 -> 2 MB (slope 0.04 MB/min), offscreen JS heap flat at 4.6-5.0 MB, 0 dropped frames, average CPU of the entire browser 0.73 core
-* browser RSS: 1584 MB at start, 1872 MB after 3.6 min, then 1878 -> 1900 MB over the next 37 min (~0.75 MB/min). Not explained; the slope is inside the test limit, but it is the one number to watch on a real 8 h day
+* browser RSS: 1584 MB at start, 1872 MB after 3.6 min, then 1878 -> 1900 MB over the next 37 min (~0.75 MB/min). Later narrowed down by a three-phase per-process run (idle 0.13 MB/min, armed 0.69 MB/min, disarmed: growth stops; the extra ~0.55 MB/min sits in the browser and GPU processes and the encoder document, see `docs/phase0-results/memslope/`). Still the one number to watch on a real 8 h day: it is unknown whether it plateaus
 * media written: 38 MB in 40 min (extrapolated ~0.4 GB per 8 h on this animated page); "Save Last Replay" after 40 min produced a 32.4 s replay (window + tail + GOP slack)
 
 **Repro Session, 31.4 min, 4 privacy pauses of ~40 s, 9 markers** (`soak/repro-timeseries.csv`):

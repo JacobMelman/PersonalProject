@@ -36,6 +36,7 @@ for (const f of ['sidepanel.html', 'review.html', 'offscreen.html', 'styles.css'
 }
 cpSync(new URL('./public/icons', import.meta.url).pathname, outdir + 'icons', { recursive: true });
 cpSync(new URL('./public/fonts', import.meta.url).pathname, outdir + 'fonts', { recursive: true });
+if (existsSync(new URL('./THIRD_PARTY_NOTICES.md', import.meta.url))) cpSync(new URL('./THIRD_PARTY_NOTICES.md', import.meta.url).pathname, outdir + 'THIRD_PARTY_NOTICES.md');
 if (existsSync(new URL('./public/sample', import.meta.url))) cpSync(new URL('./public/sample', import.meta.url).pathname, outdir + 'sample', { recursive: true });
 
 const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
