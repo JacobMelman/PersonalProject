@@ -1,0 +1,74 @@
+PASS  armed
+PASS  Repro Session started
+t=0.5m ring=0seg/0.0MB opfs=15 orphans=0 usage=1MB heap=4.6MB rss=1587MB cpu=0.73 sw=1 privacy=false
+t=1.0m ring=0seg/0.0MB opfs=30 orphans=0 usage=1MB heap=5.1MB rss=1824MB cpu=0.72 sw=1 privacy=false
+t=1.5m ring=0seg/0.0MB opfs=45 orphans=0 usage=2MB heap=4.9MB rss=1859MB cpu=0.73 sw=1 privacy=false
+t=2.0m ring=0seg/0.0MB opfs=60 orphans=0 usage=2MB heap=4.7MB rss=1867MB cpu=0.72 sw=1 privacy=false
+t=2.5m ring=0seg/0.0MB opfs=75 orphans=0 usage=3MB heap=4.7MB rss=1868MB cpu=0.73 sw=1 privacy=false
+t=3.0m ring=0seg/0.0MB opfs=90 orphans=0 usage=3MB heap=4.8MB rss=1869MB cpu=0.76 sw=1 privacy=false
+t=3.6m ring=0seg/0.0MB opfs=107 orphans=0 usage=4MB heap=4.7MB rss=1897MB cpu=0.52 sw=1 privacy=false
+t=4.8m ring=0seg/0.0MB opfs=122 orphans=0 usage=5MB heap=4.8MB rss=1890MB cpu=0.72 sw=1 privacy=false
+t=5.3m ring=0seg/0.0MB opfs=137 orphans=0 usage=5MB heap=4.8MB rss=1888MB cpu=0.73 sw=1 privacy=false
+t=5.8m ring=0seg/0.0MB opfs=152 orphans=0 usage=6MB heap=4.9MB rss=1891MB cpu=0.74 sw=1 privacy=false
+t=6.3m ring=0seg/0.0MB opfs=167 orphans=0 usage=6MB heap=4.6MB rss=1885MB cpu=0.74 sw=1 privacy=false
+t=6.8m ring=0seg/0.0MB opfs=182 orphans=0 usage=7MB heap=4.9MB rss=1891MB cpu=0.75 sw=1 privacy=false
+t=7.3m ring=0seg/0.0MB opfs=197 orphans=0 usage=7MB heap=4.7MB rss=1892MB cpu=0.73 sw=1 privacy=false
+t=7.8m ring=0seg/0.0MB opfs=212 orphans=0 usage=8MB heap=4.7MB rss=1894MB cpu=0.73 sw=1 privacy=false
+t=8.4m ring=0seg/0.0MB opfs=227 orphans=0 usage=8MB heap=4.8MB rss=1898MB cpu=0.74 sw=1 privacy=false
+t=8.9m ring=0seg/0.0MB opfs=242 orphans=0 usage=9MB heap=4.9MB rss=1891MB cpu=0.75 sw=1 privacy=false
+t=9.4m ring=0seg/0.0MB opfs=257 orphans=0 usage=9MB heap=4.7MB rss=1895MB cpu=0.74 sw=1 privacy=false
+t=9.9m ring=0seg/0.0MB opfs=272 orphans=0 usage=10MB heap=4.6MB rss=1890MB cpu=0.76 sw=1 privacy=false
+t=10.4m ring=0seg/0.0MB opfs=287 orphans=0 usage=11MB heap=4.6MB rss=1895MB cpu=0.73 sw=1 privacy=false
+t=10.9m ring=0seg/0.0MB opfs=302 orphans=0 usage=11MB heap=5MB rss=1896MB cpu=0.73 sw=1 privacy=false
+t=11.4m ring=0seg/0.0MB opfs=319 orphans=0 usage=12MB heap=4.7MB rss=1901MB cpu=0.55 sw=1 privacy=false
+t=12.6m ring=0seg/0.0MB opfs=334 orphans=0 usage=12MB heap=4.6MB rss=1896MB cpu=0.74 sw=1 privacy=false
+t=13.2m ring=0seg/0.0MB opfs=349 orphans=0 usage=13MB heap=4.8MB rss=1897MB cpu=0.74 sw=1 privacy=false
+t=13.7m ring=0seg/0.0MB opfs=364 orphans=0 usage=13MB heap=4.8MB rss=1898MB cpu=0.73 sw=1 privacy=false
+t=14.2m ring=0seg/0.0MB opfs=379 orphans=0 usage=14MB heap=4.6MB rss=1895MB cpu=0.74 sw=1 privacy=false
+t=14.7m ring=0seg/0.0MB opfs=394 orphans=0 usage=15MB heap=4.6MB rss=1897MB cpu=0.76 sw=1 privacy=false
+t=15.2m ring=0seg/0.0MB opfs=409 orphans=0 usage=15MB heap=4.6MB rss=1893MB cpu=0.76 sw=1 privacy=false
+t=15.7m ring=0seg/0.0MB opfs=424 orphans=0 usage=16MB heap=4.7MB rss=1899MB cpu=0.77 sw=1 privacy=false
+t=16.2m ring=0seg/0.0MB opfs=439 orphans=0 usage=16MB heap=4.7MB rss=1900MB cpu=0.77 sw=1 privacy=false
+t=16.7m ring=0seg/0.0MB opfs=454 orphans=0 usage=17MB heap=4.7MB rss=1904MB cpu=0.77 sw=1 privacy=false
+t=17.2m ring=0seg/0.0MB opfs=469 orphans=0 usage=17MB heap=4.7MB rss=1899MB cpu=0.74 sw=1 privacy=false
+t=17.7m ring=0seg/0.0MB opfs=484 orphans=0 usage=18MB heap=4.8MB rss=1898MB cpu=0.75 sw=1 privacy=false
+t=18.2m ring=0seg/0.0MB opfs=499 orphans=0 usage=18MB heap=4.8MB rss=1901MB cpu=0.74 sw=1 privacy=false
+t=18.8m ring=0seg/0.0MB opfs=514 orphans=0 usage=19MB heap=5MB rss=1901MB cpu=0.76 sw=1 privacy=false
+t=19.3m ring=0seg/0.0MB opfs=532 orphans=0 usage=20MB heap=4.8MB rss=1906MB cpu=0.58 sw=1 privacy=false
+t=20.5m ring=0seg/0.0MB opfs=547 orphans=0 usage=20MB heap=4.9MB rss=1904MB cpu=0.82 sw=1 privacy=false
+t=21.0m ring=0seg/0.0MB opfs=562 orphans=0 usage=21MB heap=5.1MB rss=1904MB cpu=0.79 sw=1 privacy=false
+t=21.5m ring=0seg/0.0MB opfs=577 orphans=0 usage=21MB heap=4.7MB rss=1908MB cpu=0.76 sw=1 privacy=false
+t=22.0m ring=0seg/0.0MB opfs=592 orphans=0 usage=22MB heap=4.7MB rss=1908MB cpu=0.79 sw=1 privacy=false
+t=22.5m ring=0seg/0.0MB opfs=607 orphans=0 usage=22MB heap=4.7MB rss=1908MB cpu=0.81 sw=1 privacy=false
+t=23.0m ring=0seg/0.0MB opfs=622 orphans=0 usage=23MB heap=4.7MB rss=1908MB cpu=0.80 sw=1 privacy=false
+t=23.6m ring=0seg/0.0MB opfs=637 orphans=0 usage=23MB heap=4.8MB rss=1910MB cpu=0.82 sw=1 privacy=false
+t=24.1m ring=0seg/0.0MB opfs=652 orphans=0 usage=24MB heap=4.8MB rss=1910MB cpu=0.74 sw=1 privacy=false
+t=24.6m ring=0seg/0.0MB opfs=667 orphans=0 usage=25MB heap=4.9MB rss=1910MB cpu=0.76 sw=1 privacy=false
+t=25.1m ring=0seg/0.0MB opfs=682 orphans=0 usage=25MB heap=4.9MB rss=1912MB cpu=0.73 sw=1 privacy=false
+t=25.6m ring=0seg/0.0MB opfs=697 orphans=0 usage=26MB heap=4.6MB rss=1909MB cpu=0.77 sw=1 privacy=false
+t=26.1m ring=0seg/0.0MB opfs=712 orphans=0 usage=26MB heap=4.6MB rss=1910MB cpu=0.78 sw=1 privacy=false
+t=26.6m ring=0seg/0.0MB opfs=728 orphans=1 usage=27MB heap=4.7MB rss=1915MB cpu=0.75 sw=1 privacy=false
+t=27.1m ring=0seg/0.0MB opfs=745 orphans=0 usage=27MB heap=5MB rss=1914MB cpu=0.54 sw=1 privacy=false
+t=28.4m ring=0seg/0.0MB opfs=760 orphans=0 usage=28MB heap=4.7MB rss=1907MB cpu=0.74 sw=1 privacy=false
+t=28.9m ring=0seg/0.0MB opfs=775 orphans=0 usage=29MB heap=4.7MB rss=1911MB cpu=0.75 sw=1 privacy=false
+t=29.4m ring=0seg/0.0MB opfs=790 orphans=0 usage=29MB heap=4.7MB rss=1911MB cpu=0.77 sw=1 privacy=false
+t=29.9m ring=0seg/0.0MB opfs=805 orphans=0 usage=30MB heap=4.8MB rss=1911MB cpu=0.73 sw=1 privacy=false
+t=30.4m ring=0seg/0.0MB opfs=820 orphans=0 usage=30MB heap=4.8MB rss=1916MB cpu=0.73 sw=1 privacy=false
+t=30.9m ring=0seg/0.0MB opfs=835 orphans=0 usage=31MB heap=4.9MB rss=1910MB cpu=0.75 sw=1 privacy=false
+t=31.4m ring=0seg/0.0MB opfs=850 orphans=0 usage=31MB heap=4.8MB rss=1912MB cpu=0.73 sw=1 privacy=false
+PASS  31-minute Repro Session finished
+INFO  session storage: 851 GOP segments, 28.0 MB (0.90 MB/min)
+PASS  session evidence spans the whole run (survives far beyond the 30 s rolling window)  - 31.4 min
+PASS  markers recorded  - 9 markers
+PASS  privacy pauses recorded as system events  - 4 pauses
+PASS  31-minute Evidence Package exported through the real Review page  - 28.5 MB
+PASS  exported video covers the full session (ffprobe duration)  - 31.4 min
+PASS  the end of the video is seekable and decodable
+FAIL  full decode of the whole video reports no errors (integrity)  - [null @ 0x55c02fa73d80] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 270 >= 270
+[null @ 0x55c02fa73d80] Application prov
+PASS  manifest lists capture gaps for the pauses  - 4 gaps for 4 pauses
+INFO  browser memory trend (MB/min): 2.39
+INFO  storage growth (MB/min): 0.99
+INFO  average CPU (cores): 0.74
+
+10/11 checks passed, 1 failure(s)

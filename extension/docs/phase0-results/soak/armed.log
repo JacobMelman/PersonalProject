@@ -1,0 +1,95 @@
+PASS  armed
+t=0.5m ring=14seg/0.5MB opfs=14 orphans=0 usage=1MB heap=4.6MB rss=1584MB cpu=0.76 sw=1 privacy=false
+t=1.0m ring=17seg/0.6MB opfs=17 orphans=0 usage=1MB heap=4.9MB rss=1824MB cpu=0.74 sw=1 privacy=false
+t=1.5m ring=17seg/0.6MB opfs=17 orphans=0 usage=1MB heap=4.6MB rss=1857MB cpu=0.77 sw=1 privacy=false
+t=2.0m ring=17seg/0.5MB opfs=17 orphans=0 usage=1MB heap=5MB rss=1864MB cpu=0.75 sw=1 privacy=false
+t=2.5m ring=18seg/0.6MB opfs=18 orphans=0 usage=1MB heap=4.7MB rss=1870MB cpu=0.72 sw=1 privacy=false
+t=3.0m ring=18seg/0.6MB opfs=18 orphans=0 usage=1MB heap=5MB rss=1869MB cpu=0.71 sw=1 privacy=false
+t=3.6m ring=18seg/0.6MB opfs=18 orphans=0 usage=1MB heap=4.7MB rss=1872MB cpu=0.72 sw=1 privacy=false
+t=4.1m ring=18seg/0.6MB opfs=18 orphans=0 usage=1MB heap=4.8MB rss=1870MB cpu=0.71 sw=1 privacy=false
+t=4.6m ring=19seg/0.6MB opfs=19 orphans=0 usage=1MB heap=4.6MB rss=1868MB cpu=0.72 sw=1 privacy=false
+t=5.1m ring=17seg/0.6MB opfs=17 orphans=0 usage=1MB heap=4.9MB rss=1876MB cpu=0.72 sw=1 privacy=false
+t=5.6m ring=17seg/0.6MB opfs=17 orphans=0 usage=1MB heap=4.7MB rss=1873MB cpu=0.72 sw=1 privacy=false
+t=6.1m ring=17seg/0.6MB opfs=17 orphans=0 usage=1MB heap=4.6MB rss=1874MB cpu=0.74 sw=1 privacy=false
+t=6.6m ring=17seg/0.6MB opfs=17 orphans=0 usage=1MB heap=4.9MB rss=1878MB cpu=0.74 sw=1 privacy=false
+t=7.1m ring=18seg/0.6MB opfs=18 orphans=0 usage=1MB heap=4.8MB rss=1881MB cpu=0.75 sw=1 privacy=false
+t=7.6m ring=18seg/0.6MB opfs=18 orphans=0 usage=1MB heap=5MB rss=1877MB cpu=0.72 sw=1 privacy=false
+t=8.1m ring=18seg/0.6MB opfs=18 orphans=0 usage=1MB heap=4.9MB rss=1876MB cpu=0.72 sw=1 privacy=false
+t=8.6m ring=18seg/0.6MB opfs=18 orphans=0 usage=1MB heap=4.7MB rss=1875MB cpu=0.72 sw=1 privacy=false
+t=9.2m ring=19seg/0.6MB opfs=19 orphans=0 usage=1MB heap=4.9MB rss=1875MB cpu=0.72 sw=1 privacy=false
+t=9.7m ring=16seg/0.5MB opfs=16 orphans=0 usage=1MB heap=4.7MB rss=1878MB cpu=0.74 sw=1 privacy=false
+t=10.2m ring=17seg/0.6MB opfs=17 orphans=0 usage=1MB heap=5MB rss=1877MB cpu=0.73 sw=1 privacy=false
+t=10.7m ring=17seg/0.6MB opfs=17 orphans=0 usage=1MB heap=4.8MB rss=1876MB cpu=0.73 sw=1 privacy=false
+t=11.2m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.6MB rss=1876MB cpu=0.73 sw=1 privacy=false
+t=11.7m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.9MB rss=1876MB cpu=0.75 sw=1 privacy=false
+t=12.2m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.7MB rss=1877MB cpu=0.74 sw=1 privacy=false
+t=12.7m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=5MB rss=1879MB cpu=0.72 sw=1 privacy=false
+t=13.2m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.8MB rss=1878MB cpu=0.73 sw=1 privacy=false
+t=13.7m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.6MB rss=1878MB cpu=0.73 sw=1 privacy=false
+t=14.2m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.8MB rss=1883MB cpu=0.74 sw=1 privacy=false
+t=14.8m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.6MB rss=1877MB cpu=0.73 sw=1 privacy=false
+t=15.3m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.8MB rss=1878MB cpu=0.73 sw=1 privacy=false
+t=15.8m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.6MB rss=1881MB cpu=0.72 sw=1 privacy=false
+t=16.3m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.9MB rss=1878MB cpu=0.73 sw=1 privacy=false
+t=16.8m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.7MB rss=1878MB cpu=0.73 sw=1 privacy=false
+t=17.3m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.9MB rss=1879MB cpu=0.74 sw=1 privacy=false
+t=17.8m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.8MB rss=1879MB cpu=0.73 sw=1 privacy=false
+t=18.3m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.6MB rss=1882MB cpu=0.72 sw=1 privacy=false
+t=18.8m ring=20seg/0.7MB opfs=20 orphans=0 usage=2MB heap=4.9MB rss=1882MB cpu=0.73 sw=1 privacy=false
+t=19.3m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.7MB rss=1885MB cpu=0.73 sw=1 privacy=false
+t=19.8m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.6MB rss=1879MB cpu=0.72 sw=1 privacy=false
+t=20.4m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.8MB rss=1882MB cpu=0.74 sw=1 privacy=false
+t=20.9m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.7MB rss=1884MB cpu=0.73 sw=1 privacy=false
+t=21.4m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.9MB rss=1878MB cpu=0.73 sw=1 privacy=false
+t=21.9m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.8MB rss=1877MB cpu=0.75 sw=1 privacy=false
+t=22.4m ring=19seg/0.6MB opfs=19 orphans=0 usage=3MB heap=4.9MB rss=1881MB cpu=0.74 sw=1 privacy=false
+t=22.9m ring=19seg/0.6MB opfs=19 orphans=0 usage=3MB heap=4.9MB rss=1886MB cpu=0.74 sw=1 privacy=false
+t=23.4m ring=19seg/0.6MB opfs=19 orphans=0 usage=3MB heap=4.6MB rss=1881MB cpu=0.74 sw=1 privacy=false
+t=23.9m ring=17seg/0.6MB opfs=17 orphans=0 usage=3MB heap=4.9MB rss=1884MB cpu=0.74 sw=1 privacy=false
+t=24.4m ring=17seg/0.6MB opfs=17 orphans=0 usage=3MB heap=5MB rss=1887MB cpu=0.73 sw=1 privacy=false
+t=24.9m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=4.8MB rss=1885MB cpu=0.73 sw=1 privacy=false
+t=25.4m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=5MB rss=1889MB cpu=0.72 sw=1 privacy=false
+t=25.9m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=4.8MB rss=1890MB cpu=0.73 sw=1 privacy=false
+t=26.5m ring=17seg/0.6MB opfs=19 orphans=2 usage=3MB heap=4.7MB rss=1890MB cpu=0.73 sw=1 privacy=false
+t=27.0m ring=19seg/0.6MB opfs=19 orphans=0 usage=3MB heap=4.9MB rss=1887MB cpu=0.75 sw=1 privacy=false
+t=27.5m ring=19seg/0.6MB opfs=19 orphans=0 usage=3MB heap=4.7MB rss=1890MB cpu=0.75 sw=1 privacy=false
+t=28.0m ring=19seg/0.6MB opfs=19 orphans=0 usage=3MB heap=4.6MB rss=1889MB cpu=0.73 sw=1 privacy=false
+t=28.5m ring=20seg/0.7MB opfs=20 orphans=0 usage=3MB heap=4.8MB rss=1887MB cpu=0.74 sw=1 privacy=false
+t=29.0m ring=16seg/0.5MB opfs=17 orphans=1 usage=3MB heap=4.7MB rss=1892MB cpu=0.74 sw=1 privacy=false
+t=29.5m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=5MB rss=1890MB cpu=0.73 sw=1 privacy=false
+t=30.0m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=4.8MB rss=1890MB cpu=0.73 sw=1 privacy=false
+t=30.5m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=4.6MB rss=1892MB cpu=0.72 sw=1 privacy=false
+t=31.0m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=4.9MB rss=1890MB cpu=0.72 sw=1 privacy=false
+t=31.5m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=4.7MB rss=1892MB cpu=0.71 sw=1 privacy=false
+t=32.1m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=4.6MB rss=1898MB cpu=0.72 sw=1 privacy=false
+t=32.6m ring=18seg/0.6MB opfs=18 orphans=0 usage=3MB heap=4.8MB rss=1897MB cpu=0.71 sw=1 privacy=false
+t=33.1m ring=19seg/0.6MB opfs=19 orphans=0 usage=3MB heap=4.6MB rss=1899MB cpu=0.73 sw=1 privacy=false
+t=33.6m ring=16seg/0.5MB opfs=16 orphans=0 usage=3MB heap=4.9MB rss=1902MB cpu=0.74 sw=1 privacy=false
+t=34.1m ring=17seg/0.6MB opfs=17 orphans=0 usage=3MB heap=4.7MB rss=1903MB cpu=0.74 sw=1 privacy=false
+t=34.6m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=5MB rss=1901MB cpu=0.75 sw=1 privacy=false
+t=35.1m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.8MB rss=1898MB cpu=0.74 sw=1 privacy=false
+t=35.6m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.6MB rss=1899MB cpu=0.76 sw=1 privacy=false
+t=36.1m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.8MB rss=1899MB cpu=0.73 sw=1 privacy=false
+t=36.6m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=4.6MB rss=1901MB cpu=0.75 sw=1 privacy=false
+t=37.1m ring=19seg/0.6MB opfs=19 orphans=0 usage=2MB heap=5MB rss=1904MB cpu=0.77 sw=1 privacy=false
+t=37.7m ring=18seg/0.6MB opfs=18 orphans=0 usage=2MB heap=4.7MB rss=1899MB cpu=0.75 sw=1 privacy=false
+t=38.2m ring=16seg/0.5MB opfs=16 orphans=0 usage=2MB heap=5MB rss=1900MB cpu=0.76 sw=1 privacy=false
+t=38.7m ring=16seg/0.5MB opfs=17 orphans=1 usage=2MB heap=4.8MB rss=1899MB cpu=0.74 sw=1 privacy=false
+t=39.2m ring=17seg/0.6MB opfs=18 orphans=1 usage=2MB heap=4.6MB rss=1899MB cpu=0.72 sw=1 privacy=false
+t=39.7m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.8MB rss=1900MB cpu=0.72 sw=1 privacy=false
+t=40.2m ring=17seg/0.6MB opfs=17 orphans=0 usage=2MB heap=4.6MB rss=1900MB cpu=0.72 sw=1 privacy=false
+PASS  ring stays bounded over 40 min (segments min/max 16/20, 30 s window)
+PASS  ring size in MB stays bounded  - max 0.7 MB
+PASS  no orphaned media files in OPFS (every file is indexed)  - max orphans 2
+PASS  ring events stay bounded  - max 2
+PASS  storage usage does not grow with time (slope < 0.5 MB/min)  - 0.042 MB/min, final 2 MB
+PASS  browser memory does not trend upward (slope < 2 MB/min)  - 0.84 MB/min, final 1900 MB
+PASS  offscreen JS heap does not trend upward (slope < 0.3 MB/min)  - -0.001 MB/min
+PASS  encoder drop rate < 5%  - 0.00%
+INFO  total media written (MB): 38
+INFO  average CPU (cores): 0.73
+INFO  write volume extrapolated to 8 h (GB): 0.4
+PASS  Save Last Replay after a long Armed period works
+PASS  saved replay after 40 min is bounded to the configured window (30 s + tail + GOP slack)  - 32.4 s
+
+11/11 checks passed

@@ -153,8 +153,13 @@ try {
       const t = Math.max(1, dur - 5);
       let seekOk = true; try { execFileSync('ffmpeg', ['-y', '-v', 'error', '-ss', String(t), '-i', webm, '-frames:v', '1', path.join(OUT, 'last-frame.png')]); } catch { seekOk = false; }
       ok('the end of the video is seekable and decodable', seekOk);
-      const dec = spawnSync('ffmpeg', ['-v', 'error', '-i', webm, '-f', 'null', '-'], { encoding: 'utf8', maxBuffer: 1 << 26 });
-      ok('full decode of the whole video reports no errors (integrity)', dec.status === 0 && (dec.stderr ?? '').trim() === '', (dec.stderr ?? '').slice(0, 160));
+      const dec = spawnSync('ffmpeg', ['-v', 'error', '-i', webm, '-f', 'null', '-'], { encoding: 'utf8', maxBuffer: 1 << 28 });
+      // ffmpeg's null muxer prints timestamp-rounding warnings for any millisecond-resolution variable-frame-rate WebM; those are not decoder errors.
+      const realErrors = (dec.stderr ?? '').split('\n').filter((l) => l.trim() && !/non monotonically increasing dts to muxer/.test(l));
+      ok('full decode of the whole video reports no decoder errors (integrity)', dec.status === 0 && realErrors.length === 0, realErrors.slice(0, 2).join(' | '));
+      const frames = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=pts', '-of', 'csv=p=0', webm], { maxBuffer: 1 << 28 }).toString().trim().split('\n').map(Number);
+      const nonInc = frames.filter((v, i) => i > 0 && v <= frames[i - 1]).length;
+      ok('decoded frames have strictly increasing timestamps and none were lost', nonInc === 0 && frames.length > minutes * 60 * 5, `${frames.length} frames, ${nonInc} non-increasing`);
       const man = JSON.parse(Buffer.from(z['manifest.json']).toString());
       ok('manifest lists capture gaps for the pauses', (man.video?.gaps?.length ?? 0) >= pauses, `${man.video?.gaps?.length ?? 0} gaps for ${pauses} pauses`);
     }
