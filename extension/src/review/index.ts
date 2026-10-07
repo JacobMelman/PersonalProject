@@ -123,7 +123,7 @@ async function detail(id: string): Promise<void> {
         ${pre ? `<div class="setrow" style="border:0;padding-bottom:0"><div><div class="t">Pre-session context</div><div class="s">${Math.round((pre.endWall - pre.startWall) / 1000)} s recorded before Start, shown separately and kept out of the steps</div></div><label class="switch"><input type="checkbox" id="prekeep" ${keepPre ? 'checked' : ''}><span></span></label></div>` : ''}
       </section>
       <section class="card panelcard"><h2>${icon('route')}Timeline<span class="sp small faint">raw, nothing is hidden</span></h2>
-        <div class="timeline" id="tl">${events.map((e, i) => {
+        <div class="timeline" id="tl" tabindex="0" role="region" aria-label="Timeline">${events.map((e, i) => {
           const rel = e.ts < s.startedAt ? `-${formatClock(s.startedAt - e.ts)}` : formatClock(e.ts - s.startedAt);
           const text = esc(m.timeline[i]?.text ?? e.type);
           return `<div class="tl ${e.type} ${e.ts < s.startedAt ? 'pre' : ''}" data-i="${i}"><span class="t">${rel}</span><span class="ic">${icon(TL_ICON[e.type] ?? 'info')}</span><span class="tx">${text}</span></div>`;
@@ -138,7 +138,7 @@ async function detail(id: string): Promise<void> {
         <div class="field" style="margin:0"><label for="f-notes">Notes</label><textarea class="input" id="f-notes" placeholder="Optional">${esc(ev.report.notes)}</textarea></div></section>
       <section class="card panelcard"><h2>${icon('list-checks')}Steps to reproduce<span class="sp small faint">draft · observed actions only</span></h2>
         ${m.steps.length ? `<ol class="steps">${m.steps.slice(0, 40).map((st) => `<li><span>${esc(st.text)}</span><span class="rel">${st.rel}</span></li>`).join('')}</ol>` : '<p class="muted small">No actions were recorded.</p>'}</section>
-      ${markers.length ? `<section class="card panelcard"><h2>${icon('flag')}Markers</h2><div class="markers">${markers.map((e) => `<div class="markrow">${icon('flag')}<input class="input" type="text" data-marker="${e.id}" value="${esc(e.label ?? '')}"><span class="small faint num">${formatClock(Math.max(0, e.ts - s.startedAt))}</span></div>`).join('')}</div></section>` : ''}
+      ${markers.length ? `<section class="card panelcard"><h2>${icon('flag')}Markers</h2><div class="markers">${markers.map((e) => `<div class="markrow">${icon('flag')}<input class="input" type="text" aria-label="Marker label" data-marker="${e.id}" value="${esc(e.label ?? '')}"><span class="small faint num">${formatClock(Math.max(0, e.ts - s.startedAt))}</span></div>`).join('')}</div></section>` : ''}
       <section class="card panelcard"><h2>${icon('download')}Export</h2>
         <div class="formats">${FORMATS.map((f) => `<label class="fmt"><input type="checkbox" data-fmt="${f.id}" ${f.on ? 'checked' : ''} aria-label="${f.name}">${icon(f.icon)}<b>${f.name}</b><span>${f.sub}</span><i class="tick">${icon('check')}</i></label>`).join('')}</div>
         ${ev.shots.some((x) => x.annotations.length) ? `<div class="setrow" style="padding:12px 0 0;border:0"><div><div class="t">Include original screenshots</div><div class="s">Unredacted originals go into the ZIP only if you switch this on</div></div><label class="switch"><input type="checkbox" id="inc-orig"><span></span></label></div>` : ''}

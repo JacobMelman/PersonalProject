@@ -1,0 +1,87 @@
+name: ReproDesk extension CI
+
+on:
+  push:
+    paths: ['extension/**', '.github/workflows/extension-ci.yml']
+  pull_request:
+    paths: ['extension/**', '.github/workflows/extension-ci.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extension-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: extension
+
+jobs:
+  unit:
+    name: Typecheck, unit tests, release build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Release build and package
+        run: npm run package
+      - name: Third-party notices are up to date
+        run: |
+          npm run notices
+          git diff --exit-code -- THIRD_PARTY_NOTICES.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reprodesk-extension-zip
+          path: extension/releases/*.zip
+
+  e2e:
+    name: Headless end-to-end (Playwright + extension)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
+      - name: System tools used by the pixel / media checks
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-debug
+          path: /tmp/rd-*/
+          if-no-files-found: ignore
+
+  real-browser:
+    name: Real browser (Xvfb, genuine toolbar click) - experimental
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true # window geometry and X11 timing differ per runner image; failures are reported, not blocking yet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
+      - name: System tools (virtual display, window manager, input, media)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb openbox xdotool imagemagick ffmpeg x11-utils
+      - run: npx playwright install --with-deps chromium
+      - name: Real-browser suites
+        run: |
+          export CHROME_BIN="$(node -e "console.log(require('playwright').chromium.executablePath())")"
+          npm run test:real

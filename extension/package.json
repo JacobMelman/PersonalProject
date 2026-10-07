@@ -9,7 +9,7 @@
     "build:e2e": "E2E=1 node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "E2E=1 node build.mjs && node tests/e2e/run.mjs && node tests/e2e/exports.mjs && node tests/e2e/recovery.mjs && node tests/e2e/annotate.mjs && node tests/e2e/video-redact.mjs && node tests/e2e/sample.mjs",
+    "test:e2e": "E2E=1 node build.mjs && node tests/e2e/run.mjs && node tests/e2e/exports.mjs && node tests/e2e/recovery.mjs && node tests/e2e/annotate.mjs && node tests/e2e/video-redact.mjs && node tests/e2e/sample.mjs && node tests/e2e/a11y.mjs",
     "package": "node scripts/package.mjs",
     "demo": "node scripts/demo.mjs",
     "test:real": "node build.mjs && node tests/real/real-flow.mjs && node tests/real/real-lifecycle.mjs && node tests/real/real-screenshot.mjs && node tests/real/real-remember.mjs && node tests/real/real-popup.mjs && node tests/real/real-complex.mjs",
@@ -17,11 +17,14 @@
     "soak:repro": "node build.mjs && node tests/real/soak.mjs repro 31",
     "demo:site": "node scripts/demo-site.mjs",
     "demo:app": "node scripts/make-demo-app.mjs",
-    "demo:shoot": "node build.mjs && node scripts/shoot.mjs --video"
+    "demo:shoot": "node build.mjs && node scripts/shoot.mjs --video",
+    "notices": "node scripts/gen-notices.mjs && rm -rf .notices-tmp",
+    "demo:bundle": "node build.mjs && node scripts/make-sample-bundle.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.4",
     "@types/node": "^26.6.4",
+    "axe-core": "^4.14.0",
     "esbuild": "^0.28.2",
     "playwright": "^1.56.1",
     "typescript": "^7.0.2",

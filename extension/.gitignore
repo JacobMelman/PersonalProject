@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.tmp.mjs
 real-results/
+.notices-tmp/
+docs/demo/.dl/
+docs/demo/.dlz/

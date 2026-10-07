@@ -8,6 +8,7 @@ import type { CaptureState, HealthSnapshot, ScreenshotItem, SessionKind, Session
 import { dbAdd, dbDelete, dbDeleteWhereSession, dbGet, dbGetAll, dbIndexAll, dbPut, eventsOfSession, deleteEventsRange } from '../storage/db';
 import { opfsRemove, opfsWrite } from '../storage/opfs';
 import { cleanupRing, segmentsOfSession, unpinSession } from '../storage/segments';
+import { isOwnContentScript } from '../shared/trust';
 
 const STATE_KEY = 'state';
 const RECOVERED_RETENTION_MS = 7 * 24 * 3600 * 1000;
@@ -494,8 +495,8 @@ export async function addMarker(label?: string): Promise<void> {
 
 // ---------------------------------------------------------------- content ports
 export function onPort(port: chrome.runtime.Port): void {
-  const tabId = port.sender?.tab?.id;
-  if (tabId == null) return;
+  if (!isOwnContentScript(port.sender, chrome.runtime.id)) return;
+  const tabId = port.sender!.tab!.id!;
   if (port.name === FRAME_PORT_NAME) {
     port.onMessage.addListener((msg: ContentMessage) => void serial(() => onFrameMessage(tabId, msg)));
     return;

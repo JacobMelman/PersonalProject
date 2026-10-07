@@ -123,7 +123,7 @@ function render(): void {
   }
   const toast = notice && Date.now() - notice.at < 9000 ? `<div class="toast ${notice.level}">${icon(notice.level === 'info' ? 'info' : 'triangle-alert')}<span>${esc(notice.text)}</span></div>` : '';
   app.innerHTML = `<div class="panel">
-    <div class="topbar"><div class="brand">${logo(26)}<b>${view === 'settings' ? 'Settings' : 'Capture'}</b><span class="pill accent">Phase 0</span></div>
+    <div class="topbar"><div class="brand">${logo(26)}<h1>${view === 'settings' ? 'Settings' : 'Capture'}</h1><span class="pill accent">Phase 0</span></div>
       <button class="iconbtn ${view === 'settings' ? 'on' : ''}" data-nav="${view === 'settings' ? 'main' : 'settings'}" title="${view === 'settings' ? 'Back' : 'Settings & diagnostics'}" aria-label="Settings">${icon(view === 'settings' ? 'arrow-left' : 'settings')}</button></div>
     ${body}${toast}</div>`;
   if (refocus) {
@@ -146,7 +146,7 @@ function sessionRow(s: SessionRecord): string {
 function seg(key: keyof Settings, values: Array<[number, string]>): string {
   return `<div class="seg" role="group">${values.map(([v, l]) => `<button data-seg="${key}" data-v="${v}" class="${Number(settings[key]) === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
 }
-const sw = (key: keyof Settings) => `<label class="switch"><input type="checkbox" data-sb="${key}" ${settings[key] ? 'checked' : ''}><span></span></label>`;
+const sw = (key: keyof Settings, name: string) => `<label class="switch"><input type="checkbox" aria-label="${name}" data-sb="${key}" ${settings[key] ? 'checked' : ''}><span></span></label>`;
 const row = (t: string, s: string, ctl: string) => `<div class="setrow"><div><div class="t">${t}</div><div class="s">${s}</div></div>${ctl}</div>`;
 
 function settingsView(): string {
@@ -156,12 +156,12 @@ function settingsView(): string {
     ${row('Post-trigger tail', 'Recorded after you press Save', seg('tailSec', [[0, '0'], [3, '3s'], [5, '5s'], [10, '10s']]))}
     ${row('Pre-session context', 'Kept before a Repro Session starts', seg('preSessionSec', [[0, 'Off'], [30, '30s']]))}
     ${row('AFK suspend', 'After this idle time (locked = immediately)', seg('afkMinutes', [[0, 'Off'], [5, '5m'], [10, '10m'], [15, '15m'], [30, '30m']]))}
-    ${row('Marker screenshots', 'Capture a screenshot with every marker', sw('markerScreenshot'))}
-    ${row('Video capture', 'Off = Screenshot-only (applies when arming)', sw('captureVideo'))}
-    ${row('Open report after saving', 'Jump straight to Review', sw('openReviewAfterSave'))}</div></div>
+    ${row('Marker screenshots', 'Capture a screenshot with every marker', sw('markerScreenshot', 'Marker screenshots'))}
+    ${row('Video capture', 'Off = Screenshot-only (applies when arming)', sw('captureVideo', 'Video capture'))}
+    ${row('Open report after saving', 'Jump straight to Review', sw('openReviewAfterSave', 'Open report after saving'))}</div></div>
     <div class="section"><h2>Target profile</h2><div class="card drawer">
-    <div class="field" style="margin-top:10px"><label>Environment</label><input class="input" type="text" data-s="environment" value="${esc(settings.environment)}"></div>
-    <div class="field"><label>Extra approved origins</label><input class="input" type="text" data-s="approvedOrigins" value="${esc(settings.approvedOrigins.join(', '))}" placeholder="https://auth.example.com"><span class="hint">Comma separated. Same Target Profile, semantic scope only.</span></div></div></div>
+    <div class="field" style="margin-top:10px"><label>Environment</label><input class="input" type="text" aria-label="Environment" data-s="environment" value="${esc(settings.environment)}"></div>
+    <div class="field"><label>Extra approved origins</label><input class="input" type="text" aria-label="Extra approved origins" data-s="approvedOrigins" value="${esc(settings.approvedOrigins.join(', '))}" placeholder="https://auth.example.com"><span class="hint">Comma separated. Same Target Profile, semantic scope only.</span></div></div></div>
     <div class="section"><h2>Quality</h2><div class="card drawer">
     ${row('Frame rate', 'Frames per second', seg('fps', [[5, '5'], [10, '10'], [15, '15'], [24, '24'], [30, '30']]))}
     ${row('Bitrate', 'Video quality vs. size', seg('bitrateKbps', [[600, '0.6'], [1000, '1'], [1500, '1.5'], [2500, '2.5'], [4000, '4']]))}</div></div>
@@ -174,7 +174,7 @@ function settingsView(): string {
       <span>Frames encoded</span><span>${h?.framesEncoded ?? 0}</span><span>Dropped</span><span>${h?.framesDropped ?? 0}</span>
       <span>Stream</span><span>${h?.codec ? `${h.codec.startsWith('vp09') ? 'VP9' : h.codec} ${h.width}×${h.height}` : '-'}</span>
       <span>Media written</span><span>${bytes(h?.bytesWritten ?? 0)}</span><span>Offscreen heap</span><span>${h?.jsHeapMB ?? '-'} MB</span><span>Service worker starts</span><span>${swStarts}</span></div>
-      <pre class="diag" id="diag">${esc(diagText())}</pre><button class="btn sm" id="copydiag">${icon('copy')}Copy diagnostics JSON</button></div></div>`;
+      <pre class="diag" id="diag" tabindex="0" aria-label="Diagnostics">${esc(diagText())}</pre><button class="btn sm" id="copydiag">${icon('copy')}Copy diagnostics JSON</button></div></div>`;
 }
 
 function diagText(): string {

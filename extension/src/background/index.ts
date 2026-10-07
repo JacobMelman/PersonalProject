@@ -7,6 +7,7 @@ import type { CommandMessage, OffscreenEvent } from '../shared/messages';
 import { getSettings } from '../shared/settings';
 import { minimizeUrl } from '../shared/privacy';
 import type { Settings } from '../shared/types';
+import { isOwnExtensionPage, isRememberableOrigin } from '../shared/trust';
 
 // User invocation of the extension (toolbar icon) is what grants activeTab, which tabCapture requires.
 // sidePanel.open must be called synchronously inside the gesture, before any await.
@@ -38,7 +39,9 @@ chrome.commands.onCommand.addListener((command) => {
   });
 });
 
-chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg: unknown, sender, sendResponse) => {
+  // Defence in depth: only this extension's own pages may command the worker (never a web page context or another extension).
+  if (!isOwnExtensionPage(sender, chrome.runtime.id, chrome.runtime.getURL(''))) return false;
   const m = msg as { kind?: string };
   if (m?.kind === 'cmd') {
     const c = msg as CommandMessage;
@@ -74,6 +77,8 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
 
 /** "Remember this site": persistent content-script registration for an origin the user granted host access to. */
 async function registerRememberedSite(origin: string): Promise<void> {
+  if (!isRememberableOrigin(origin)) throw new Error('Not a plain http(s) origin');
+  if (!(await chrome.permissions.contains({ origins: [`${origin}/*`] }))) throw new Error('Host access for this origin was not granted');
   const id = 'rd-' + origin.replace(/[^a-z0-9]/gi, '_');
   const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
   if (!existing.length) {
