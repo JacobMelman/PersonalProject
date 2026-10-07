@@ -28,9 +28,13 @@ function latestRun(segs: SegmentMeta[]): SegmentMeta[] {
   return run;
 }
 
+/** Segments of the replay (latest contiguous run with one encoder configuration), optionally dropping everything before `fromWall`. */
+export async function selectRun(sessionId: string, fromWall = 0): Promise<SegmentMeta[]> {
+  return latestRun((await segmentsOfSession(sessionId)).filter((s) => s.endWall > fromWall));
+}
+
 export async function muxSessionVideo(sessionId: string, fromWall = 0): Promise<MuxedVideo | null> {
-  const all = (await segmentsOfSession(sessionId)).filter((s) => s.endWall > fromWall);
-  const run = latestRun(all);
+  const run = await selectRun(sessionId, fromWall);
   if (!run.length) return null;
   const first = run[0];
   const baseUs = first.startWall * 1000;

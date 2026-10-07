@@ -1,6 +1,8 @@
 import { loadEvidence, saveReport, type LoadedEvidence } from '../report/evidence';
 import { buildReportModel, SESSION_TYPE, type ReportModel } from '../report/model';
 import { muxSessionVideo, type MuxedVideo } from '../report/video';
+import { renderEditedVideo } from '../report/video-redact';
+import { activeMasks, afterCuts, editId, hasEdits, inCut, normalizeCuts, sanitizeEdits, type VideoEdits } from '../shared/video-edits';
 import { renderHtml } from '../report/render-html';
 import { renderMarkdown, renderTxt } from '../report/render-text';
 import { renderDocx } from '../report/render-docx';
@@ -8,7 +10,11 @@ import { renderXlsx } from '../report/render-xlsx';
 import { buildEvidencePackage } from '../report/package';
 import { expandTemplate, formatClock, sanitizeFilename, stamp, uniqueName } from '../shared/filename';
 import { dbGetAll, dbPut } from '../storage/db';
+import type { ScreenshotItem } from '../shared/types';
 import { sessionThumb } from '../report/thumb';
+import { openEditor } from './editor';
+import { flatten } from '../ui/annotate-render';
+import { hasRedaction } from '../shared/annotations';
 import type { SessionRecord, TimelineEvent, TimelineType } from '../shared/types';
 import { icon, type IconName } from '../ui/icons';
 import { logo } from '../ui/brand';
@@ -56,6 +62,10 @@ async function detail(id: string): Promise<void> {
   let videoUrl = '';
   let videoErr = '';
   let exportNote = '';
+  let edits: VideoEdits = sanitizeEdits(ev.session.videoEdits, 24 * 3600 * 1000);
+  let previewing = false;
+  let previewUrl = '';
+  let maskDraft: { x1: number; y1: number; x2: number; y2: number } | null = null;
 
   const buildVideo = async () => {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -69,11 +79,13 @@ async function detail(id: string): Promise<void> {
       videoErr = e instanceof Error ? e.message : String(e);
     }
   };
-  const model = (): ReportModel =>
-    buildReportModel({
-      session: ev.session, events: ev.events, shots: ev.shots, report: ev.report, keepPre,
-      videoInfo: video ? { filename: 'replay.webm', startWall: video.startWall, durationMs: video.durationMs, codec: video.codec, width: video.width, height: video.height } : null,
+  const model = (over?: { events?: TimelineEvent[]; shots?: LoadedEvidence['shots']; video?: MuxedVideo | null }): ReportModel => {
+    const v = over && 'video' in over ? over.video : video;
+    return buildReportModel({
+      session: ev.session, events: over?.events ?? ev.events, shots: over?.shots ?? ev.shots, report: ev.report, keepPre,
+      videoInfo: v ? { filename: 'replay.webm', startWall: v.startWall, durationMs: v.durationMs, codec: v.codec, width: v.width, height: v.height } : null,
     });
+  };
 
   await buildVideo();
   const shotUrls = ev.shots.map((s) => URL.createObjectURL(new Blob([s.data as BlobPart], { type: 'image/png' })));
@@ -102,7 +114,10 @@ async function detail(id: string): Promise<void> {
     </div>
     <div class="grid2"><div class="col">
       <section class="card panelcard"><h2>${icon('film')}Replay</h2>
-        ${video ? `<div class="player"><video id="vid" controls playsinline src="${videoUrl}"></video><div class="player__bar"><span>${icon('video')} ${video.codec.startsWith('vp09') ? 'VP9' : 'VP8'} · ${video.segments} GOP segments${video.gaps.length ? ` · ${video.gaps.length} capture gap${video.gaps.length > 1 ? 's' : ''} (pauses)` : ''}</span><span style="margin-left:auto">Click a timeline row to jump</span></div></div>`
+        ${video ? `<div class="player"><div class="stage" id="stage"><video id="vid" controls playsinline src="${videoUrl}"></video><div class="vover" id="vover"></div></div><div class="player__bar"><span>${icon('video')} ${video.codec.startsWith('vp09') ? 'VP9' : 'VP8'} · ${video.segments} GOP segments${video.gaps.length ? ` · ${video.gaps.length} capture gap${video.gaps.length > 1 ? 's' : ''} (pauses)` : ''}</span><span style="margin-left:auto">Click a timeline row to jump</span></div></div>
+        <div class="ptools" id="ptools"><div class="ptools__head">${icon('shield-alert')}<b>Privacy tools</b><span class="faint small">hide sensitive pixels before export</span></div>
+          <div class="ptools__btns"><button class="btn sm" id="pt-mask">${icon('grid-3x3')}Mask a region</button><button class="btn sm" id="pt-cut">${icon('scissors')}Cut out a range</button><button class="btn sm" id="pt-preview">${icon('eye-off')}Preview redacted</button></div>
+          <div id="pt-form"></div><ul class="pt-list" id="pt-list"></ul></div>`
           : `<div class="novideo">${icon('film')}<b>No video available</b><span>${esc(s.videoFailure ?? videoErr ?? 'This session has no video.')}</span></div>`}
         ${pre ? `<div class="setrow" style="border:0;padding-bottom:0"><div><div class="t">Pre-session context</div><div class="s">${Math.round((pre.endWall - pre.startWall) / 1000)} s recorded before Start, shown separately and kept out of the steps</div></div><label class="switch"><input type="checkbox" id="prekeep" ${keepPre ? 'checked' : ''}><span></span></label></div>` : ''}
       </section>
@@ -112,7 +127,7 @@ async function detail(id: string): Promise<void> {
           const text = esc(m.timeline[i]?.text ?? e.type);
           return `<div class="tl ${e.type} ${e.ts < s.startedAt ? 'pre' : ''}" data-i="${i}"><span class="t">${rel}</span><span class="ic">${icon(TL_ICON[e.type] ?? 'info')}</span><span class="tx">${text}</span></div>`;
         }).join('') || '<div class="muted small" style="padding:10px">No events.</div>'}</div></section>
-      ${ev.shots.length ? `<section class="card panelcard"><h2>${icon('image')}Screenshots<span class="sp small faint">${ev.shots.length}</span></h2><div class="gallery">${ev.shots.map((sh, i) => `<a class="shot" href="${shotUrls[i]}" data-shot="${i}"><img src="${shotUrls[i]}" alt="screenshot ${i + 1}"><div><span>${sh.markerOrdinal ? `Marker ${sh.markerOrdinal}` : `Shot ${i + 1}`}</span><span class="num">${formatClock(Math.max(0, sh.ts - s.startedAt))}</span></div></a>`).join('')}</div></section>` : ''}
+      ${ev.shots.length ? `<section class="card panelcard"><h2>${icon('image')}Screenshots<span class="sp small faint">${ev.shots.length} · pencil = annotate / blur</span></h2><div class="gallery">${ev.shots.map((sh, i) => `<div class="shot"><a href="${shotUrls[i]}" data-shot="${i}"><img src="${shotUrls[i]}" alt="screenshot ${i + 1}"></a>${sh.annotations.length ? `<span class="flag badge ${hasRedaction(sh.annotations) ? 'warn' : 'live'}">${hasRedaction(sh.annotations) ? 'Redacted' : 'Annotated'}</span>` : ''}<div class="edit"><button class="iconbtn" data-edit="${i}" title="Annotate, blur or redact" aria-label="Annotate screenshot ${i + 1}">${icon('pencil')}</button></div><div class="cap"><span>${sh.markerOrdinal ? `Marker ${sh.markerOrdinal}` : `Shot ${i + 1}`}</span><span class="num">${formatClock(Math.max(0, sh.ts - s.startedAt))}</span></div></div>`).join('')}</div></section>` : ''}
     </div><div class="col">
       <section class="card panelcard"><h2>${icon('file-text')}Report</h2>
         <div class="field"><label for="f-title">Title</label><input class="input" type="text" id="f-title" value="${esc(ev.report.title)}"></div>
@@ -125,6 +140,7 @@ async function detail(id: string): Promise<void> {
       ${markers.length ? `<section class="card panelcard"><h2>${icon('flag')}Markers</h2><div class="markers">${markers.map((e) => `<div class="markrow">${icon('flag')}<input class="input" type="text" data-marker="${e.id}" value="${esc(e.label ?? '')}"><span class="small faint num">${formatClock(Math.max(0, e.ts - s.startedAt))}</span></div>`).join('')}</div></section>` : ''}
       <section class="card panelcard"><h2>${icon('download')}Export</h2>
         <div class="formats">${FORMATS.map((f) => `<label class="fmt"><input type="checkbox" data-fmt="${f.id}" ${f.on ? 'checked' : ''} aria-label="${f.name}">${icon(f.icon)}<b>${f.name}</b><span>${f.sub}</span><i class="tick">${icon('check')}</i></label>`).join('')}</div>
+        ${ev.shots.some((x) => x.annotations.length) ? `<div class="setrow" style="padding:12px 0 0;border:0"><div><div class="t">Include original screenshots</div><div class="s">Unredacted originals go into the ZIP only if you switch this on</div></div><label class="switch"><input type="checkbox" id="inc-orig"><span></span></label></div>` : ''}
         <div class="field" style="margin:14px 0 0"><label for="fname">File name</label><input class="input" type="text" id="fname" value="Bug-{date}_{time}"><span class="hint" id="fprev"></span></div>
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn primary" id="export" style="flex:1">${icon('download')}Export selected</button><button class="btn" id="cpmd">${icon('copy')}Markdown</button><button class="btn" id="cptxt">${icon('copy')}Text</button></div>
         <div class="exstatus" id="exstatus">${exportNote}</div></section>
@@ -144,6 +160,157 @@ async function detail(id: string): Promise<void> {
     };
   };
 
+  // ---------------------------------------------------------------- privacy tools for the replay
+  const parseT = (v: string): number | null => {
+    const t = v.trim();
+    if (!t) return null;
+    const m = /^(\d+):(\d{1,2})(?:\.(\d+))?$/.exec(t);
+    if (m) return (Number(m[1]) * 60 + Number(m[2])) * 1000 + (m[3] ? Number(`0.${m[3]}`) * 1000 : 0);
+    return Number.isFinite(Number(t)) ? Number(t) * 1000 : null;
+  };
+  const saveEdits = async () => {
+    ev.session = { ...ev.session, videoEdits: edits };
+    await dbPut('sessions', ev.session);
+  };
+  function contentRect(vid: HTMLVideoElement) {
+    const r = vid.getBoundingClientRect();
+    const ar = (vid.videoWidth || 16) / (vid.videoHeight || 9);
+    let w = r.width, h = r.height;
+    if (r.width / r.height > ar) w = r.height * ar; else h = r.width / ar;
+    return { x: (r.width - w) / 2, y: (r.height - h) / 2, w, h };
+  }
+  function wirePrivacy(vid: HTMLVideoElement | null): void {
+    const box = document.getElementById('ptools');
+    if (!box || !vid || !video) return;
+    const stage = document.getElementById('stage')!;
+    const over = document.getElementById('vover')!;
+    const form = document.getElementById('pt-form')!;
+    const list = document.getElementById('pt-list')!;
+    const dur = video.durationMs;
+    const nowMs = () => Math.round(vid.currentTime * 1000);
+    const pct = (v: number) => `${Math.round(v * 100)}%`;
+
+    const paintOverlay = () => {
+      over.innerHTML = '';
+      if (previewing) return;
+      const c = contentRect(vid);
+      const t = nowMs();
+      for (const m of activeMasks(edits.masks, t)) {
+        const d = document.createElement('div');
+        d.className = `vmask ${m.type}`;
+        d.style.cssText = `left:${c.x + Math.min(m.x1, m.x2) * c.w}px;top:${c.y + Math.min(m.y1, m.y2) * c.h}px;width:${Math.abs(m.x2 - m.x1) * c.w}px;height:${Math.abs(m.y2 - m.y1) * c.h}px`;
+        over.appendChild(d);
+      }
+      if (maskDraft) {
+        const d = document.createElement('div');
+        d.className = 'vmask draft';
+        d.style.cssText = `left:${c.x + Math.min(maskDraft.x1, maskDraft.x2) * c.w}px;top:${c.y + Math.min(maskDraft.y1, maskDraft.y2) * c.h}px;width:${Math.abs(maskDraft.x2 - maskDraft.x1) * c.w}px;height:${Math.abs(maskDraft.y2 - maskDraft.y1) * c.h}px`;
+        over.appendChild(d);
+      }
+    };
+    const paintList = () => {
+      const items = [
+        ...edits.masks.map((m) => `<li><span class="pt-ic">${icon(m.type === 'blur' ? 'grid-3x3' : 'rectangle-horizontal')}</span><span><b>${m.type === 'blur' ? 'Blur' : 'Redact'}</b> ${formatClock(m.fromMs)}–${formatClock(m.toMs)} <span class="faint small">· ${pct(Math.abs(m.x2 - m.x1))}×${pct(Math.abs(m.y2 - m.y1))}</span></span><button class="iconbtn" data-rm-mask="${m.id}" aria-label="Remove mask">${icon('trash-2')}</button></li>`),
+        ...edits.cuts.map((c) => `<li><span class="pt-ic">${icon('scissors')}</span><span><b>Cut out</b> ${formatClock(c.fromMs)}–${formatClock(c.toMs)} <span class="faint small">· frames, events and screenshots in this range are dropped from exports</span></span><button class="iconbtn" data-rm-cut="${c.id}" aria-label="Remove cut">${icon('trash-2')}</button></li>`),
+      ];
+      list.innerHTML = items.join('') || `<li class="faint small" style="padding:6px 2px">No privacy edits. The exported video is the untouched recording.</li>`;
+      (document.getElementById('pt-preview') as HTMLButtonElement).disabled = !hasEdits(edits);
+    };
+    const refresh = () => { paintList(); paintOverlay(); };
+    const timeInputs = (from: number, to: number) => `<label>From <input class="input sm" id="pt-from" value="${formatClock(from)}" size="6"></label><button class="btn ghost sm" id="pt-from-now">now</button><label>To <input class="input sm" id="pt-to" value="${formatClock(to)}" size="6"></label><button class="btn ghost sm" id="pt-to-now">now</button>`;
+    const bindNow = () => {
+      document.getElementById('pt-from-now')?.addEventListener('click', () => ((document.getElementById('pt-from') as HTMLInputElement).value = formatClock(nowMs())));
+      document.getElementById('pt-to-now')?.addEventListener('click', () => ((document.getElementById('pt-to') as HTMLInputElement).value = formatClock(nowMs())));
+    };
+    const closeForm = () => { form.innerHTML = ''; maskDraft = null; stage.querySelector('.maskdraw')?.remove(); refresh(); };
+    const readRange = () => {
+      const f = parseT((document.getElementById('pt-from') as HTMLInputElement).value), t = parseT((document.getElementById('pt-to') as HTMLInputElement).value);
+      if (f == null || t == null || t <= f) return null;
+      return { fromMs: Math.max(0, f), toMs: Math.min(dur, t) };
+    };
+
+    document.getElementById('pt-mask')!.addEventListener('click', () => {
+      closeForm();
+      vid.pause();
+      form.innerHTML = `<div class="ptform"><span class="faint small">${icon('crosshair')} Drag a rectangle over the part of the video you want to hide.</span><button class="btn ghost sm" id="pt-cancel">Cancel</button></div>`;
+      document.getElementById('pt-cancel')!.addEventListener('click', closeForm);
+      const layer = document.createElement('div');
+      layer.className = 'maskdraw';
+      stage.appendChild(layer);
+      stage.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
+      let start: { x: number; y: number } | null = null;
+      const at = (e: PointerEvent) => { const c = contentRect(vid), r = vid.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - r.left - c.x) / c.w)), y: Math.min(1, Math.max(0, (e.clientY - r.top - c.y) / c.h)) }; };
+      layer.addEventListener('pointerdown', (e) => { layer.setPointerCapture(e.pointerId); start = at(e); maskDraft = { x1: start.x, y1: start.y, x2: start.x, y2: start.y }; paintOverlay(); });
+      layer.addEventListener('pointermove', (e) => { if (!start) return; const p = at(e); maskDraft = { x1: start.x, y1: start.y, x2: p.x, y2: p.y }; paintOverlay(); });
+      layer.addEventListener('pointerup', () => {
+        if (!start || !maskDraft) return;
+        const d = maskDraft; start = null;
+        if (Math.abs(d.x2 - d.x1) < 0.01 || Math.abs(d.y2 - d.y1) < 0.01) { maskDraft = null; paintOverlay(); return; }
+        layer.remove();
+        form.innerHTML = `<div class="ptform"><div class="seg" id="pt-type"><button class="on" data-t="blur">Blur</button><button data-t="redact">Black box</button></div>${timeInputs(nowMs(), Math.min(dur, nowMs() + 10_000))}<button class="btn primary sm" id="pt-add">Add mask</button><button class="btn ghost sm" id="pt-cancel2">Cancel</button></div><p class="faint small" style="margin:6px 0 0">Applies to the chosen time range. The original recording stays untouched on this device.</p>`;
+        bindNow();
+        let type: 'blur' | 'redact' = 'blur';
+        form.querySelectorAll<HTMLElement>('#pt-type button').forEach((b) => b.addEventListener('click', () => { type = b.dataset.t as 'blur' | 'redact'; form.querySelectorAll('#pt-type button').forEach((x) => x.classList.toggle('on', x === b)); }));
+        document.getElementById('pt-cancel2')!.addEventListener('click', closeForm);
+        document.getElementById('pt-add')!.addEventListener('click', async () => {
+          const r = readRange();
+          if (!r) return void (form.querySelector('.faint')!.textContent = 'Enter a valid range (mm:ss), the end after the start.');
+          edits = { ...edits, masks: [...edits.masks, { id: editId('mk'), type, x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2, ...r }] };
+          await saveEdits();
+          closeForm();
+        });
+      });
+    });
+    document.getElementById('pt-cut')!.addEventListener('click', () => {
+      closeForm();
+      form.innerHTML = `<div class="ptform">${timeInputs(nowMs(), Math.min(dur, nowMs() + 5000))}<button class="btn primary sm" id="pt-add">Cut out</button><button class="btn ghost sm" id="pt-cancel">Cancel</button></div><p class="faint small" style="margin:6px 0 0">Removes the range from the exported video, the timeline, steps and screenshots.</p>`;
+      bindNow();
+      document.getElementById('pt-cancel')!.addEventListener('click', closeForm);
+      document.getElementById('pt-add')!.addEventListener('click', async () => {
+        const r = readRange();
+        if (!r) return void (form.querySelector('.faint')!.textContent = 'Enter a valid range (mm:ss), the end after the start.');
+        edits = { ...edits, cuts: [...edits.cuts, { id: editId('cu'), ...r }] };
+        await saveEdits();
+        closeForm();
+      });
+    });
+    list.addEventListener('click', async (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-rm-mask],[data-rm-cut]');
+      if (!b) return;
+      edits = { masks: edits.masks.filter((m) => m.id !== b.dataset.rmMask), cuts: edits.cuts.filter((c) => c.id !== b.dataset.rmCut) };
+      await saveEdits();
+      refresh();
+    });
+    document.getElementById('pt-preview')!.addEventListener('click', async () => {
+      if (previewing) {
+        previewing = false;
+        vid.src = videoUrl;
+        document.getElementById('pt-preview')!.innerHTML = `${icon('eye-off')}Preview redacted`;
+        form.innerHTML = '';
+        return refresh();
+      }
+      form.innerHTML = `<div class="ptform"><span class="faint small" id="pt-prog">Rendering the redacted copy… 0%</span></div>`;
+      try {
+        const out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, onProgress: (f) => { const el = document.getElementById('pt-prog'); if (el) el.textContent = `Rendering the redacted copy… ${Math.round(f * 100)}%`; } });
+        if (!out) throw new Error('nothing to render');
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = URL.createObjectURL(out.blob);
+        previewing = true;
+        vid.src = previewUrl;
+        form.innerHTML = `<div class="ptform"><span class="badge warn">Preview</span><span class="small muted">This is the redacted copy that will be exported. The original is unchanged.</span></div>`;
+        document.getElementById('pt-preview')!.innerHTML = `${icon('rewind')}Back to original`;
+        paintOverlay();
+      } catch (err) {
+        form.innerHTML = `<div class="ptform"><span class="small" style="color:var(--red)">Could not render: ${esc(err instanceof Error ? err.message : String(err))}</span></div>`;
+      }
+    });
+    vid.addEventListener('timeupdate', paintOverlay);
+    vid.addEventListener('seeked', paintOverlay);
+    vid.addEventListener('loadedmetadata', paintOverlay);
+    addEventListener('resize', paintOverlay);
+    refresh();
+  }
+
   function wire(m: ReportModel): void {
     const vid = document.getElementById('vid') as HTMLVideoElement | null;
     const tl = document.getElementById('tl');
@@ -151,7 +318,8 @@ async function detail(id: string): Promise<void> {
     tl?.addEventListener('click', (e) => {
       const row = (e.target as HTMLElement).closest('[data-i]') as HTMLElement | null;
       if (!row || !vid || !video) return;
-      vid.currentTime = Math.max(0, (events[Number(row.dataset.i)].ts - video.startWall) / 1000);
+      const ms = events[Number(row.dataset.i)].ts - video.startWall;
+      vid.currentTime = Math.max(0, (previewing ? afterCuts(ms, normalizeCuts(edits.cuts)) : ms) / 1000);
     });
     // live highlight: the timeline follows the video
     let lastIdx = -1;
@@ -169,6 +337,7 @@ async function detail(id: string): Promise<void> {
         tl.scrollTop = row.offsetTop - tl.clientHeight / 2 + row.clientHeight / 2;
       }
     });
+    wirePrivacy(vid);
     document.getElementById('prekeep')?.addEventListener('change', async (e) => {
       readFields();
       keepPre = (e.target as HTMLInputElement).checked;
@@ -195,6 +364,25 @@ async function detail(id: string): Promise<void> {
       await saveReport(ev.report);
       if (fid === 'f-title') document.querySelector('.title h1')!.textContent = ev.report.title;
     }));
+    // annotation editor
+    document.querySelectorAll<HTMLElement>('[data-edit]').forEach((b) => b.addEventListener('click', () => {
+      const i = Number(b.dataset.edit);
+      const sh = ev.shots[i];
+      void openEditor({
+        original: new Blob([sh.original as BlobPart], { type: 'image/png' }), annotations: sh.annotations, title: `Screenshot ${i + 1}`,
+        onSave: async (list) => {
+          readFields();
+          const { data: _d, original: _o, width: _w, height: _h, ...item } = sh;
+          void _d; void _o; void _w; void _h;
+          await dbPut('shots', { ...item, annotations: list } satisfies ScreenshotItem);
+          const data = list.length ? await flatten(new Blob([sh.original as BlobPart], { type: 'image/png' }), list) : sh.original;
+          URL.revokeObjectURL(shotUrls[i]);
+          shotUrls[i] = URL.createObjectURL(new Blob([data as BlobPart], { type: 'image/png' }));
+          ev.shots[i] = { ...sh, annotations: list, data };
+          draw();
+        },
+      });
+    }));
     // lightbox
     const lb = document.getElementById('lightbox')!;
     document.querySelectorAll<HTMLAnchorElement>('[data-shot]').forEach((a) => a.addEventListener('click', (e) => {
@@ -214,10 +402,10 @@ async function detail(id: string): Promise<void> {
     fname.addEventListener('input', preview);
     preview();
 
-    const rebuild = async () => {
+    const rebuild = async (over?: Parameters<typeof model>[0]) => {
       readFields();
       await saveReport(ev.report);
-      return model();
+      return model(over);
     };
     const copy = async (kind: 'md' | 'txt') => {
       const mm = await rebuild();
@@ -232,7 +420,26 @@ async function detail(id: string): Promise<void> {
     document.getElementById('cptxt')!.addEventListener('click', () => void copy('txt'));
 
     document.getElementById('export')!.addEventListener('click', async () => {
-      const mm = await rebuild();
+      // Privacy edits: frames/events/screenshots inside cut ranges never reach any export; masks are burned into the re-encoded video.
+      const cutsN = normalizeCuts(edits.cuts);
+      const edited = hasEdits(edits) && !!video;
+      const keptEvents = edited && video ? ev.events.filter((e) => !inCut(e.ts - video!.startWall, cutsN)) : ev.events;
+      const keptShots = edited && video ? ev.shots.filter((s2) => !inCut(s2.ts - video!.startWall, cutsN)) : ev.shots;
+      let exportVideo: MuxedVideo | null = video;
+      let exportVideoBytes: Uint8Array | undefined;
+      if (edited && video && (document.querySelector('[data-fmt="zip"]') as HTMLInputElement | null)?.checked) {
+        setStatus([`<div class="r">${icon('refresh-cw')}<span id="ex-prog">Rendering the redacted video… 0%</span></div>`]);
+        try {
+          const out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, onProgress: (f) => { const el = document.getElementById('ex-prog'); if (el) el.textContent = `Rendering the redacted video… ${Math.round(f * 100)}%`; } });
+          if (out) {
+            exportVideo = { ...video, blob: out.blob, durationMs: out.durationMs };
+            exportVideoBytes = new Uint8Array(await out.blob.arrayBuffer());
+          }
+        } catch (err) {
+          return setStatus([`<div class="r bad">${icon('triangle-alert')}<span>Redacted video could not be rendered, nothing was exported: ${esc(err instanceof Error ? err.message : String(err))}</span></div>`]);
+        }
+      }
+      const mm = await rebuild({ events: keptEvents, shots: keptShots, video: exportVideo });
       const fmts = [...document.querySelectorAll<HTMLInputElement>('[data-fmt]')].filter((c) => c.checked).map((c) => c.dataset.fmt!);
       if (!fmts.length) return setStatus([`<div class="r bad">${icon('triangle-alert')}Select at least one format.</div>`]);
       const used = new Set<string>();
@@ -247,9 +454,17 @@ async function detail(id: string): Promise<void> {
           else if (f === 'docx') blob = await renderDocx(mm);
           else if (f === 'xlsx') blob = renderXlsx(mm);
           else {
+            const extraFiles: Record<string, Uint8Array> = {};
+            if ((document.getElementById('inc-orig') as HTMLInputElement | null)?.checked) {
+              for (const sh of ev.shots) {
+                const ref = mm.screenshots.find((x) => x.id === sh.id);
+                if (ref && sh.annotations.length) extraFiles[ref.filename.replace('screenshots/', 'screenshots/originals/')] = sh.original;
+              }
+            }
             blob = await buildEvidencePackage({
-              model: mm, session: ev.session, events: ev.events, shots: ev.shots, video, keepPre, version: VERSION,
-              videoBytes: video ? new Uint8Array(await video.blob.arrayBuffer()) : undefined,
+              model: mm, session: ev.session, events: keptEvents, shots: keptShots, video: exportVideo, keepPre, version: VERSION, extraFiles,
+              videoBytes: exportVideo ? exportVideoBytes ?? new Uint8Array(await exportVideo.blob.arrayBuffer()) : undefined,
+              videoEdits: edited ? { masks: edits.masks.length, cuts: edits.cuts.length } : undefined,
             });
           }
           const name = uniqueName(`${baseName()}.${f}`, used);

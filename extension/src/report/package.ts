@@ -5,6 +5,7 @@ import type { ScreenshotItem, SessionRecord, TimelineEvent } from '../shared/typ
 import { renderHtml } from './render-html';
 import { renderMarkdown, renderTxt } from './render-text';
 import type { MuxedVideo } from './video';
+import { hasRedaction } from '../shared/annotations';
 
 export async function sha256Hex(data: Uint8Array): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', data as BufferSource);
@@ -23,6 +24,8 @@ export interface PackageInput {
   extraFiles?: Record<string, Uint8Array>;
   keepPre: boolean;
   version: string;
+  /** Set when the replay was re-rendered with privacy edits (counts only; geometry stays out of the package). */
+  videoEdits?: { masks: number; cuts: number };
 }
 
 export async function buildEvidencePackage(inp: PackageInput): Promise<Blob> {
@@ -39,7 +42,7 @@ export async function buildEvidencePackage(inp: PackageInput): Promise<Blob> {
   files['events.json'] = strToU8(
     JSON.stringify(visibleEvents.map((e) => ({ ts_ms: e.ts - session.startedAt, ts: e.ts, type: e.type, target: e.origin ? { kind: 'web', origin: e.origin, path: e.path } : undefined, element: e.element, value: null, label: e.label, system: e.system, source: e.source, confidence: e.confidence })), null, 2),
   );
-  files['session.json'] = strToU8(JSON.stringify({ ...session, screenshots: shots.map(({ id, ts, origin, path, browser, viewport, captureMode, markerOrdinal }) => ({ id, ts, origin, path, browser, viewport, captureMode, markerOrdinal })) }, null, 2));
+  files['session.json'] = strToU8(JSON.stringify({ ...session, screenshots: shots.map(({ id, ts, origin, path, browser, viewport, captureMode, markerOrdinal, annotations }) => ({ id, ts, origin, path, browser, viewport, captureMode, markerOrdinal, annotations, redacted: hasRedaction(annotations) })) }, null, 2));
   const artifacts: Array<{ path: string; bytes: number; sha256: string }> = [];
   for (const [path, data] of Object.entries(files)) artifacts.push({ path, bytes: data.byteLength, sha256: await sha256Hex(data) });
   const manifest = {
@@ -56,8 +59,9 @@ export async function buildEvidencePackage(inp: PackageInput): Promise<Blob> {
     end: session.endedAt ? new Date(session.endedAt).toISOString() : null,
     last_committed: session.lastCommittedAt ? new Date(session.lastCommittedAt).toISOString() : null,
     pre_session_context: session.preContext ? { present: true, kept: inp.keepPre, seconds: Math.round((session.preContext.endWall - session.preContext.startWall) / 1000) } : { present: false },
-    video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps } : null,
-    notes: 'sha256 values are integrity metadata only, not a claim of forensic chain-of-custody.',
+    video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : false } : null,
+    screenshots: shots.map((sh) => ({ id: sh.id, annotated: (sh.annotations?.length ?? 0) > 0, redacted: hasRedaction(sh.annotations), original_included: Object.keys(inp.extraFiles ?? {}).some((k) => k.startsWith('screenshots/originals/') && k.includes(sh.id)) })),
+    notes: 'sha256 values are integrity metadata only, not a claim of forensic chain-of-custody. Redacted screenshots are exported flattened; originals are included only when the exporter asked for them.',
     artifacts,
   };
   files['manifest.json'] = strToU8(JSON.stringify(manifest, null, 2));

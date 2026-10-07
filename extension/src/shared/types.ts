@@ -101,6 +101,8 @@ export interface SessionRecord {
   classification?: string;
   classificationNote?: string;
   videoFailure?: string;
+  /** Privacy edits applied to the replay on export (masks over time ranges, cut-outs). The stored evidence is never modified. */
+  videoEdits?: VideoEdits;
   reviewedAt?: number;
 }
 
@@ -145,6 +147,9 @@ export interface TimelineEvent {
   frame?: boolean;
 }
 
+import type { Annotation } from './annotations';
+import type { VideoEdits } from './video-edits';
+
 export interface ScreenshotItem {
   id: string;
   sessionId: string;
@@ -158,7 +163,8 @@ export interface ScreenshotItem {
   markerOrdinal?: number;
   bytes: number;
   file: string;
-  annotations: unknown[];
+  /** Non-destructive annotation layer (normalised geometry). The original image blob is never modified. */
+  annotations: Annotation[];
 }
 
 export interface ReportRecord {

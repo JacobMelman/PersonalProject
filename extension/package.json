@@ -9,7 +9,7 @@
     "build:e2e": "E2E=1 node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "E2E=1 node build.mjs && node tests/e2e/run.mjs && node tests/e2e/exports.mjs && node tests/e2e/recovery.mjs",
+    "test:e2e": "E2E=1 node build.mjs && node tests/e2e/run.mjs && node tests/e2e/exports.mjs && node tests/e2e/recovery.mjs && node tests/e2e/annotate.mjs && node tests/e2e/video-redact.mjs",
     "package": "node scripts/package.mjs",
     "demo": "node scripts/demo.mjs",
     "test:real": "node build.mjs && node tests/real/real-flow.mjs && node tests/real/real-lifecycle.mjs && node tests/real/real-screenshot.mjs && node tests/real/real-remember.mjs && node tests/real/real-popup.mjs && node tests/real/real-complex.mjs",
