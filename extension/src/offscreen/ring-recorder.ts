@@ -37,8 +37,8 @@ export class RingRecorder {
   private ringBytes = 0;
   private ringSegments = 0;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
-  private lastBitmap: ImageBitmap | null = null;
-  private lastBitmapAt = 0;
+  /** The newest frame of the approved tab. Tab capture is damage-driven: no new frame means nothing on screen changed. */
+  private latest: VideoFrame | null = null;
   private shotWaiters: Array<(b: ImageBitmap | null) => void> = [];
 
   constructor(settings: Settings, private cb: RecorderCallbacks) {
@@ -128,7 +128,11 @@ export class RingRecorder {
         if (done || !raw) break;
         this.stats.framesIn++;
         const nowMs = Date.now();
-        if (!this.paused && (this.shotWaiters.length || nowMs - this.lastBitmapAt > 1000)) await this.keepBitmap(raw, nowMs);
+        if (!this.paused) {
+          this.latest?.close();
+          this.latest = raw.clone();
+          if (this.shotWaiters.length) await this.serveShot(raw);
+        }
         if (this.paused || nowMs * 1000 - this.lastEncodedUs < minGapUs * 0.85) {
           raw.close();
           continue;
@@ -167,34 +171,34 @@ export class RingRecorder {
     }
   }
 
-  /** Keeps ~1 fps worth of the newest frame so a screenshot can be taken even when the page is static (no new frames). */
-  private async keepBitmap(raw: VideoFrame, nowMs: number): Promise<void> {
-    try {
-      const bmp = await createImageBitmap(raw);
-      this.lastBitmap?.close();
-      this.lastBitmap = bmp;
-      this.lastBitmapAt = nowMs;
-      const waiters = this.shotWaiters.splice(0);
-      waiters.forEach((w) => w(bmp));
-    } catch {
-      /* frame unavailable */
+  private async serveShot(raw: VideoFrame): Promise<void> {
+    const waiters = this.shotWaiters.splice(0);
+    for (const w of waiters) {
+      try {
+        w(await createImageBitmap(raw));
+      } catch {
+        w(null);
+      }
     }
   }
 
   /** Screenshot straight from the approved tab's own video stream, written to OPFS (messages cannot carry binary data). */
   async grabScreenshot(file: string): Promise<{ ok: boolean; bytes?: number; width?: number; height?: number; error?: string }> {
     if (this.paused) return { ok: false, error: 'capture is paused' };
-    const fresh = await new Promise<ImageBitmap | null>((resolve) => {
+    // Prefer a frame that arrives now; on a still page none will, and then the newest frame IS the current screen.
+    let bmp = await new Promise<ImageBitmap | null>((resolve) => {
       this.shotWaiters.push(resolve);
-      setTimeout(() => resolve(null), 800);
+      setTimeout(() => resolve(null), 600);
     });
-    const bmp = fresh ?? (this.lastBitmap && Date.now() - this.lastBitmapAt < 5000 ? this.lastBitmap : null);
-    if (!bmp) return { ok: false, error: 'no recent frame from the target tab' };
+    if (!bmp && this.latest) bmp = await createImageBitmap(this.latest).catch(() => null);
+    if (!bmp) return { ok: false, error: 'no frame from the target tab yet' };
     const canvas = new OffscreenCanvas(bmp.width, bmp.height);
     canvas.getContext('2d')!.drawImage(bmp, 0, 0);
+    const width = bmp.width, height = bmp.height;
+    bmp.close();
     const blob = await canvas.convertToBlob({ type: 'image/png' });
     await opfsWrite(file, blob);
-    return { ok: true, bytes: blob.size, width: bmp.width, height: bmp.height };
+    return { ok: true, bytes: blob.size, width, height };
   }
 
   private onChunk(chunk: EncodedVideoChunk): void {
@@ -259,6 +263,9 @@ export class RingRecorder {
   pause(): void {
     if (this.paused) return;
     this.paused = true;
+    // A frame from before the pause must never stand in for the screen after it.
+    this.latest?.close();
+    this.latest = null;
     void this.flushNow();
   }
 
@@ -303,8 +310,8 @@ export class RingRecorder {
       /* ignore */
     }
     this.stream?.getTracks().forEach((t) => t.stop());
-    this.lastBitmap?.close();
-    this.lastBitmap = null;
+    this.latest?.close();
+    this.latest = null;
     this.stream = null;
     this.encoder = null;
   }

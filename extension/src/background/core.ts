@@ -460,9 +460,18 @@ export async function takeScreenshot(opts: { markerOrdinal?: number; markerEvent
       if (s.mode !== 'screenshot_only' && (await hasOffscreen())) {
         // Preferred path: a frame of the already-approved tab stream. It cannot show any other tab by construction and needs no extra permission.
         const r = await sendOff<{ ok: boolean; bytes?: number; width?: number; height?: number; error?: string }>({ kind: 'off', op: 'screenshot', file });
-        if (!r?.ok) throw new Error(r?.error ?? 'frame grab failed');
-        bytes = r.bytes ?? 0;
-        if (r.width && r.height) viewport = { width: r.width, height: r.height };
+        if (r?.ok) {
+          bytes = r.bytes ?? 0;
+          if (r.width && r.height) viewport = { width: r.width, height: r.height };
+        } else {
+          // No frame yet (e.g. right after a pause on a page that has not repainted): the same validated, active tab can still be
+          // captured directly when Chrome's activeTab grant is alive; otherwise the original reason is reported.
+          const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' }).catch(() => null);
+          if (!dataUrl) throw new Error(r?.error ?? 'frame grab failed');
+          const blob = await (await fetch(dataUrl)).blob();
+          await opfsWrite(file, blob);
+          bytes = blob.size;
+        }
       } else {
         const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' }); // needs activeTab: toolbar click or shortcut
         const blob = await (await fetch(dataUrl)).blob();

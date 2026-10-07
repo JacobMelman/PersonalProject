@@ -1,19 +1,25 @@
 // Demo film: a paced, scripted run of the Northwind Gear scenario in real headed Chromium (Xvfb), recorded at 30 fps,
-// with an eased mouse cursor, click ripples, human-speed typing and English caption cues captured at record time.
-// Output (docs/demo/): reprodesk-demo.mp4 (clean), reprodesk-demo-subtitles.mp4 (captions in a bar under the picture), reprodesk-demo.en.srt
-//   node scripts/film.mjs            (needs Xvfb, openbox, xdotool, ffmpeg with libass, ImageMagick, Pillow; see README)
+// with an eased mouse cursor, click ripples, human-speed typing, an English voice-over and YouTube-style captions.
+// The narration is synthesized first (offline neural TTS, Piper), so every scene lasts at least as long as its narration and
+// every caption is timed to the exact phrase being spoken.
+// Output (docs/demo/): reprodesk-demo.mp4 (voice-over, no captions), reprodesk-demo-subtitles.mp4 (voice-over + captions), reprodesk-demo.en.srt
+//   node scripts/film.mjs     needs Xvfb, openbox, xdotool, ffmpeg with libass, ImageMagick, Pillow (see README); the first run also
+//   creates a Python venv with piper-tts and fetches the CC0 voice "en_US joe medium" from npm into ~/.cache/reprodesk-film.
+//   FILM_VOICE_MODEL=/path/voice.onnx (with voice.onnx.json next to it) uses any other Piper voice instead.
 import { startDisplay, launchChrome, tmpProfile, rmProfile, sleep, xdo, findPage, browserCdp, locateToolbarIcon, shot, keyInfo, DISPLAY } from '../tests/real/lib.mjs';
 import { makeProbe } from '../tests/real/probe.mjs';
 import { startDemoSite } from './demo-site.mjs';
 import path from 'node:path';
-import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 const out = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../docs/demo');
 mkdirSync(out, { recursive: true });
 const PORT = Number(process.env.RD_PORT ?? 9333), SITE = Number(process.env.RD_SITE ?? 5173);
-const W = 1500, H = 940, FPS = 30, BAR = 100;
+const W = 1500, H = 940, FPS = 30;
+const here = path.dirname(fileURLToPath(import.meta.url));
 const work = path.join(out, '.film');
 rmSync(work, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
@@ -76,21 +82,78 @@ const pointAt = (off, r, fx, fy) => ({ x: Math.round(off.dx + r.x + r.w * fx), y
 
 // ------------------------------------------------------------------ captions
 let recStartWall = 0;
-const cues = [];
 const vt = () => (Date.now() - recStartWall) / 1000;
-const say = (text, hold) => { const s = vt(); cues.push({ s, e: s + (hold ?? Math.min(7, Math.max(3, text.length / 13))), text }); };
 const beat = (ms) => sleep(ms);
-const readHold = (text) => Math.min(8, Math.max(3, 1.6 + text.length / 16));
-/** A caption that stays up for the whole scene (at least long enough to read), while the actions run. */
-async function scene(text, fn, minHold) {
-  const cue = { s: vt(), e: 0, text };
-  cues.push(cue);
+const timeline = {};
+/** One narrated scene: the voice starts with the scene, the scene lasts at least as long as its narration (+ a breath). */
+async function scene(id, fn, extra = 0.6) {
+  if (!VOICE[id]) throw new Error('no narration for scene ' + id);
+  timeline[id] = vt();
   const t0 = Date.now();
   if (fn) await fn();
-  const rest = (minHold ?? readHold(text)) * 1000 - (Date.now() - t0);
+  const rest = (VOICE[id].duration + extra) * 1000 - (Date.now() - t0);
   if (rest > 0) await sleep(rest);
-  cue.e = vt();
 }
+
+
+// ------------------------------------------------------------------ narration (spoken text -> caption text)
+const C = (say, show = say) => ({ say, show });
+const NARRATION = {
+  intro: [C('This is Repro Desk.', 'This is ReproDesk.'), C('It captures a bug once, and gives developers the evidence.')],
+  app: [C('Our demo app is Northwind Gear:'), C('a web shop with two deliberate bugs.')],
+  arm: [C('One click on the toolbar icon arms Repro Desk for this tab only.', 'One click on the toolbar icon arms ReproDesk for this tab only.'), C('Chrome requires that explicit click, so nothing ever records silently.')],
+  armed: [C('Now it is armed.'), C('A rolling buffer keeps only the last ninety seconds, on this computer.', 'A rolling buffer keeps only the last 90 seconds, on this computer.'), C('No keystrokes are collected, and only this tab is recorded.')],
+  test: [C('Test as usual.'), C('Repro Desk quietly keeps the latest moments in its buffer.', 'ReproDesk quietly keeps the latest moments in its buffer.')],
+  replay: [C('Something looked wrong?'), C('Save last replay keeps what just happened.'), C('The shortcut is Alt, Shift, R. There is no need to reproduce it.', 'Shortcut: Alt+Shift+R. No need to reproduce it.')],
+  repro: [C('For a known bug, start a Repro Session.'), C('It records the whole path, plus thirty seconds of context from before the start.', 'It records the whole path, plus 30 seconds of context from before the start.')],
+  bug1: [C('Bug one: the promo code summer twenty shows a discount,', 'Bug 1: the promo code SUMMER20 shows a discount,'), C('but the total does not change.')],
+  marker: [C('Add a marker to flag this moment.'), C('A screenshot is taken automatically.')],
+  checkout: [C('Now the checkout form.'), C('Typed text is never stored as events.'), C('The video does show pixels, though,'), C('so we will hide sensitive values before sharing.')],
+  bug2: [C('Bug two: place order fails, with error E, forty twenty one.', 'Bug 2: Place order fails with error E-4021.')],
+  pause: [C('If you look at another tab, recording pauses by itself.'), C('Nothing from other tabs is ever stored.')],
+  resume: [C('Back on the approved tab, capture resumes.')],
+  finish: [C('Finish and review stops the recording, and opens the report.', 'Finish & review stops the recording and opens the report.')],
+  review: [C('Here is the report: the video, a live timeline,'), C('and steps drafted from what really happened. No A I guesses.', 'and steps drafted from what really happened. No AI guesses.')],
+  timeline: [C('Click any row of the timeline to jump to that moment.')],
+  editor: [C('Before sharing, hide sensitive data.'), C('Open a screenshot, blur the card number, and box the error.')],
+  editorSave: [C('The original screenshot is never modified.'), C('Only the exported copy carries the blur.')],
+  videoMask: [C('Do the same for the video: mask the card field.'), C('The preview shows exactly what will be exported.')],
+  videoDone: [C('There: the card number is blurred in every frame.')],
+  describe: [C('Describe what happened, and what you expected.'), C('The expected result is always written by you.')],
+  export: [C('One click exports an evidence package, an H T M L report, and a Word document.', 'One click exports an Evidence Package, an HTML report and a Word document.')],
+  html: [C('The H T M L report is self contained, with the blurred screenshots,', 'The HTML report is self-contained, with the blurred screenshots,'), C('so developers can open it anywhere.')],
+  closing: [C('Everything stays on this device until you export it.'), C('Administrators can lock settings and restrict sites with standard browser policies.')],
+  final: [C('Repro Desk: evidence instead of retelling.', 'ReproDesk: evidence instead of retelling.')],
+};
+
+function ensureVoice() {
+  const cache = process.env.FILM_CACHE || path.join(os.homedir(), '.cache', 'reprodesk-film');
+  mkdirSync(cache, { recursive: true });
+  const venv = path.join(cache, 'venv');
+  const py = path.join(venv, 'bin', 'python');
+  if (!existsSync(py)) {
+    execFileSync('python3', ['-m', 'venv', venv], { stdio: 'inherit' });
+    execFileSync(path.join(venv, 'bin', 'pip'), ['install', '-q', 'piper-tts==1.8.0', 'numpy'], { stdio: 'inherit' });
+  }
+  if (process.env.FILM_VOICE_MODEL) return { py, model: process.env.FILM_VOICE_MODEL, config: process.env.FILM_VOICE_MODEL + '.json' };
+  const vdir = path.join(cache, 'voice');
+  const model = path.join(vdir, 'package', 'float.onnx');
+  if (!existsSync(model)) {
+    mkdirSync(vdir, { recursive: true });
+    const tgz = execFileSync('npm', ['pack', 'vowel-lab-voices-float@0.1.0', '--silent'], { cwd: vdir }).toString().trim().split('\n').pop();
+    execFileSync('tar', ['xzf', path.join(vdir, tgz), '-C', vdir]);
+  }
+  const config = model + '.json';
+  if (!existsSync(config)) execFileSync(py, [path.join(here, 'narrate.py'), 'config', config]);
+  return { py, model, config };
+}
+
+const voice = ensureVoice();
+const voiceDir = path.join(work, 'voice');
+writeFileSync(path.join(work, 'narration.json'), JSON.stringify({ model: voice.model, config: voice.config, length_scale: 1.06, scenes: Object.entries(NARRATION).map(([id, chunks]) => ({ id, chunks })) }));
+execFileSync(voice.py, [path.join(here, 'narrate.py'), 'synth', path.join(work, 'narration.json'), voiceDir], { stdio: 'inherit' });
+const VOICE = Object.fromEntries(JSON.parse(readFileSync(path.join(voiceDir, 'manifest.json'), 'utf8')).scenes.map((x) => [x.id, x]));
+console.log('narration ready:', Object.values(VOICE).reduce((a, x) => a + x.duration, 0).toFixed(1), 's of speech in', Object.keys(VOICE).length, 'scenes');
 
 // ------------------------------------------------------------------ scenario
 const site = await startDemoSite(SITE);
@@ -120,14 +183,14 @@ try {
   await sleep(600);
 
   // ---- 1. intro
-  await scene('ReproDesk: capture a bug once, give developers the evidence.');
-  await scene('Demo app: Northwind Gear, a web shop with two deliberate bugs.');
+  await scene('intro', null, 0.4);
+  await scene('app', null, 0.5);
 
   // ---- 2. arm
   const iconX = locateToolbarIcon();
   if (iconX < 0) throw new Error('toolbar icon not found');
   let panel, panelOff;
-  await scene('One click on the toolbar icon arms ReproDesk for this tab only. Chrome requires that explicit action, so nothing records silently.', async () => {
+  await scene('arm', async () => {
     await click(iconX, 63, 1100);
     await probe.until(async () => (await probe.state())?.mode === 'armed', 12000);
     panel = await findPage(PORT, 'chrome-extension://' + keyInfo.id + '/sidepanel.html');
@@ -135,12 +198,12 @@ try {
     panelOff = await calibrate(panel, { x: 1420, y: 420 });
     await ripple(page);
   });
-  await scene('Armed: a rolling buffer keeps only the last 90 seconds, locally. No keystrokes are collected and only this tab is recorded.', async () => {
+  await scene('armed', async () => {
     await glide(panelOff.dx + 190, panelOff.dy + 215, 900);
   });
 
   // ---- 3. normal testing
-  await scene('Test as usual: ReproDesk quietly keeps the latest moments in its buffer.', async () => {
+  await scene('test', async () => {
     await clickEl(page, tabOff, '[data-add="backpack"]'); await beat(800);
     await clickEl(page, tabOff, '[data-add="tent"]'); await beat(800);
     await clickEl(page, tabOff, '[data-add="lamp"]'); await beat(1200);
@@ -149,13 +212,13 @@ try {
   });
 
   // ---- 4. instant replay
-  await scene('Something looked wrong? Save last replay (Alt+Shift+R) keeps what just happened, so there is no need to reproduce it.', async () => {
+  await scene('replay', async () => {
     await clickEl(panel, panelOff, '[data-c="saveReplay"]', { ms: 900 });
     await beat(3200);
   });
 
   // ---- 5. repro session
-  await scene('For a known bug, start a Repro Session: the whole path is recorded, plus 30 seconds of context from before the start.', async () => {
+  await scene('repro', async () => {
     await clickEl(page, tabOff, '#nav-cart', { ms: 800 });
     await beat(1200);
     await clickEl(panel, panelOff, '[data-c="startRepro"]', { ms: 900 });
@@ -163,17 +226,19 @@ try {
   });
 
   // ---- 6. bug 1
-  await scene('Bug 1: the promo code SUMMER20 shows a discount, but the total does not change.', async () => {
+  await scene('bug1', async () => {
     await clickEl(page, tabOff, '#promo'); await typeText('summer20', 120); await beat(500);
     await clickEl(page, tabOff, '#apply'); await beat(2200);
   });
-  await scene('Add a marker to flag the moment. A screenshot is taken automatically.', async () => {
+  await scene('marker', async () => {
     await clickEl(panel, panelOff, '#markerLabel'); await typeText('Promo discount not applied to total', 55);
-    await clickEl(panel, panelOff, '[data-c="marker"]'); await beat(1800);
+    await clickEl(panel, panelOff, '[data-c="marker"]');
+    await probe.until(async () => (await probe.dump('shots')).length >= 1, 8000, 250); // the marker screenshot lands asynchronously
+    await beat(800);
   });
 
   // ---- 7. bug 2
-  await scene('Fill in the checkout form. Typed text is never stored as events; the pixels can be hidden later, before sharing.', async () => {
+  await scene('checkout', async () => {
     await clickEl(page, tabOff, '#checkout-btn', { ms: 800 }); await beat(1500);
     await clickEl(page, tabOff, '#name'); await typeText('Alex Morgan', 90);
     await clickEl(page, tabOff, '#email'); await typeText('alex@example.com', 70);
@@ -181,20 +246,26 @@ try {
     await clickEl(page, tabOff, '#exp'); await typeText('1228', 110);
     await clickEl(page, tabOff, '#cvv'); await typeText('123', 110); await beat(500);
   });
-  await scene('Bug 2: Place order fails with error E-4021.', async () => {
+  await scene('bug2', async () => {
     await clickEl(page, tabOff, '#place'); await beat(2300);
     await clickEl(panel, panelOff, '#markerLabel'); await typeText('Order fails with E-4021', 55);
-    await clickEl(panel, panelOff, '[data-c="marker"]'); await beat(1500);
+    await clickEl(panel, panelOff, '[data-c="marker"]');
+    const got = await probe.until(async () => (await probe.dump('shots')).length >= 2, 8000, 250); // wait for it before leaving the tab
+    if (!got) {
+      const evs = (await probe.dump('events')).filter((e) => e.type === 'system' || e.type === 'marker' || e.type === 'screenshot').slice(-8).map((e) => `${e.type}:${e.label}${e.note ? ' (' + e.note + ')' : ''}`);
+      console.log('second marker screenshot missing; shots =', (await probe.dump('shots')).length, '; recent events:', evs.join(' | '));
+    }
+    await beat(600);
   });
   const boxes = await page.eval(`(() => { const n = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; }; return { card: n('#card'), err: n('#error .err') }; })()`);
 
   // ---- 8. privacy pause
   let blank = null;
-  await scene('Look at another tab and recording pauses by itself. Nothing from other tabs is ever stored.', async () => {
+  await scene('pause', async () => {
     blank = (await browser.send('Target.createTarget', { url: 'about:blank' })).targetId;
     await beat(3800);
   });
-  await scene('Back on the approved tab, capture resumes.', async () => {
+  await scene('resume', async () => {
     await browser.send('Target.closeTarget', { targetId: blank });
     const fix = (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).find((t) => t.type === 'page' && t.url.startsWith(`http://localhost:${SITE}/`));
     if (fix) await browser.send('Target.activateTarget', { targetId: fix.id });
@@ -204,7 +275,7 @@ try {
   // ---- 9. finish and review
   let rv = null;
   await probe.setSettings({ openReviewAfterSave: true }); // the report should open by itself now, but not after the quick replay above
-  await scene('Finish & review stops the recording and opens the report.', async () => {
+  await scene('finish', async () => {
     await clickEl(panel, panelOff, '[data-c="finishRepro"]', { ms: 900 });
     for (let i = 0; i < 40 && !rv; i++) { await sleep(500); rv = await findPage(PORT, `chrome-extension://${keyInfo.id}/review.html?session=`); }
     if (!rv) throw new Error('Review page did not open');
@@ -213,12 +284,12 @@ try {
     await sleep(900);
     await ripple(rv);
   });
-  await scene('Review: the video, a live timeline and steps drafted from what really happened. No AI guesses.', async () => {
+  await scene('review', async () => {
     await rv.eval(`(() => { const v = document.getElementById('vid'); v.muted = true; v.currentTime = 4; return v.play(); })()`).catch(() => undefined);
     await glide(tabOff.dx + 760, tabOff.dy + 520, 900);
     await beat(2800);
   });
-  await scene('Click any row of the timeline to jump to that moment in the video.', async () => {
+  await scene('timeline', async () => {
     const row = await rv.eval(`(() => { const rows = [...document.querySelectorAll('#tl .tl')]; const i = rows.findIndex((r) => /Place order/i.test(r.textContent)); return i < 0 ? 8 : i; })()`);
     await rv.eval(`document.querySelector('#tl [data-i="${row}"]').scrollIntoView({ block: 'center', behavior: 'instant' })`);
     await sleep(400);
@@ -228,7 +299,7 @@ try {
 
   // ---- 10. screenshot editor
   await smoothTo(rv, '.gallery', 'center');
-  await scene('Hide sensitive data before sharing: open a screenshot, blur the card number and box the error.', async () => {
+  await scene('editor', async () => {
     await clickEl(rv, tabOff, '[data-edit="1"]', { ms: 900 });
     await sleep(1400);
     await ripple(rv);
@@ -241,14 +312,14 @@ try {
     await drag(pointAt(tabOff, c, boxes.err[0] - pad, boxes.err[1] - pad), pointAt(tabOff, c, boxes.err[2] + pad, boxes.err[3] + pad));
     await beat(900);
   });
-  await scene('The original screenshot is never modified. Only the exported copy carries the blur.', async () => {
+  await scene('editorSave', async () => {
     await clickEl(rv, tabOff, '#ed-save', { ms: 900 });
     await beat(1500);
   });
 
   // ---- 11. video privacy tools
   await smoothTo(rv, '.player', 'center');
-  await scene('Do the same for video: mask the card field. The preview shows exactly what will be exported.', async () => {
+  await scene('videoMask', async () => {
     await clickEl(rv, tabOff, '#pt-mask', { ms: 900 });
     await sleep(500);
     const vr = await rv.eval(`(() => { const v = document.getElementById('vid'); const r = v.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, vw: v.videoWidth, vh: v.videoHeight }; })()`);
@@ -261,22 +332,24 @@ try {
     await clickEl(rv, tabOff, '#pt-to'); selectAll(); await typeText('59:00', 100);
     await clickEl(rv, tabOff, '#pt-add', { ms: 800 }); await beat(900);
     await clickEl(rv, tabOff, '#pt-preview', { ms: 800 });
-    for (let i = 0; i < 120; i++) { if (await rv.eval(`!!document.querySelector('#pt-form .badge')`)) break; await sleep(500); }
-    await sleep(600);
-    await rv.eval(`(() => { const v = document.getElementById('vid'); v.pause(); v.currentTime = Math.max(0, v.duration - 5.5); })()`);
-    await beat(3000);
-    await clickEl(rv, tabOff, '#pt-preview', { ms: 700 }); await beat(600);
   });
+  for (let i = 0; i < 120; i++) { if (await rv.eval(`!!document.querySelector('#pt-form .badge')`)) break; await sleep(500); }
+  await sleep(400);
+  await scene('videoDone', async () => {
+    await rv.eval(`(() => { const v = document.getElementById('vid'); v.pause(); v.currentTime = Math.max(0, v.duration - 5.5); v.muted = true; return v.play(); })()`).catch(() => undefined);
+    await beat(2400);
+  }, 1.0);
+  await clickEl(rv, tabOff, '#pt-preview', { ms: 700 }); await beat(600);
 
   // ---- 12. report and export
   await smoothTo(rv, '#f-actual', 'center');
-  await scene('Describe what happened and what you expected. The expected result is always written by you.', async () => {
+  await scene('describe', async () => {
     await clickEl(rv, tabOff, '#f-actual'); await typeText('Promo SUMMER20 shows a discount but the total is unchanged; Place order fails with E-4021.', 35);
     await clickEl(rv, tabOff, '#f-exp'); await typeText('The total includes the discount and the order is placed.', 35);
     await beat(500);
   });
   await smoothTo(rv, '#export', 'center');
-  await scene('One click exports an Evidence Package, an HTML report and a Word report.', async () => {
+  await scene('export', async () => {
     await clickEl(rv, tabOff, '.fmt:has([data-fmt="docx"])', { ms: 800 });
     await beat(400);
     await clickEl(rv, tabOff, '#export', { ms: 800 });
@@ -287,7 +360,7 @@ try {
   // ---- 13. exported report
   const htmlFile = readdirSync(dl).find((f) => f.endsWith('.html'));
   if (htmlFile) {
-    await scene('The HTML report is self-contained, with the blurred screenshots, so developers can open it anywhere.', async () => {
+    await scene('html', async () => {
       await browser.send('Target.createTarget', { url: 'file://' + path.join(dl, htmlFile) });
       await sleep(2500);
       const rp = await findPage(PORT, 'file://');
@@ -299,11 +372,11 @@ try {
   }
 
   // ---- 14. closing
-  await scene('Everything stays on this device until you export it. Administrators can lock settings and restrict sites with standard browser policies.', async () => {
+  await scene('closing', async () => {
     await browser.send('Target.createTarget', { url: `chrome-extension://${keyInfo.id}/review.html` });
     await sleep(2500);
   });
-  await scene('ReproDesk: evidence instead of retelling.', null, 3.5);
+  await scene('final', null, 2.2);
   await sleep(600);
 } catch (e) {
   console.error('film aborted:', e instanceof Error ? e.stack : e);
@@ -319,18 +392,35 @@ if (process.exitCode) process.exit(process.exitCode);
 const raw = path.join(work, 'raw.mp4');
 if (!existsSync(raw)) throw new Error('no recording');
 const dur = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', raw]).toString());
-cues.forEach((c, i) => { const next = cues[i + 1]; c.e = Math.min(c.e, next ? next.s - 0.08 : dur - 0.2); });
+
+// captions: one per spoken phrase, on screen while it is spoken (plus a short tail), never overlapping
+const caps = [];
+for (const [id, start] of Object.entries(timeline).sort((a, b) => a[1] - b[1])) for (const c of VOICE[id].chunks) caps.push({ s: start + c.start, e: start + c.end + 0.45, text: c.show });
+caps.forEach((c, i) => { const n = caps[i + 1]; c.e = Math.min(c.e, n ? n.s - 0.04 : dur - 0.3); });
 const ts = (t, srt) => { const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60; const sec = srt ? s.toFixed(3).replace('.', ',').padStart(6, '0') : s.toFixed(2).padStart(5, '0'); return srt ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${sec}` : `${h}:${String(m).padStart(2, '0')}:${sec}`; };
-const wrap = (text, n = 78) => { const lines = []; let line = ''; for (const w of text.split(' ')) { if ((line + ' ' + w).trim().length > n) { lines.push(line); line = w; } else line = (line + ' ' + w).trim(); } if (line) lines.push(line); return lines; };
-writeFileSync(path.join(out, 'reprodesk-demo.en.srt'), cues.map((c, i) => `${i + 1}\n${ts(c.s, true)} --> ${ts(c.e, true)}\n${wrap(c.text).join('\n')}\n`).join('\n'));
-const TH = H + BAR;
-const ass = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${TH}\nWrapStyle: 2\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Cap,Inter,30,&H00FFFFFF,&H00FFFFFF,&H002B1A0E,&H002B1A0E,0,0,0,0,100,100,0,0,1,0,0,2,60,60,22,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${cues.map((c) => `Dialogue: 0,${ts(c.s, false)},${ts(c.e, false)},Cap,,0,0,0,,${wrap(c.text).join('\\N')}`).join('\n')}\n`;
+/** At most two balanced lines, like broadcast / YouTube captions. */
+const lines = (text, n = 44) => {
+  if (text.length <= n) return [text];
+  const mid = text.length / 2;
+  let best = -1;
+  for (let i = 0; i < text.length; i++) if (text[i] === ' ' && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+  return best < 0 ? [text] : [text.slice(0, best), text.slice(best + 1)];
+};
+writeFileSync(path.join(out, 'reprodesk-demo.en.srt'), caps.map((c, i) => `${i + 1}\n${ts(c.s, true)} --> ${ts(c.e, true)}\n${lines(c.text).join('\n')}\n`).join('\n'));
+// YouTube look: white text, each line on its own 75 % black box, bottom centre, over the picture
+const ass = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: YT,Inter,33,&H00FFFFFF,&H00FFFFFF,&H40000000,&H40000000,0,0,0,0,100,100,0,0,3,8,0,2,40,40,46,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${caps.map((c) => `Dialogue: 0,${ts(c.s, false)},${ts(c.e, false)},YT,,0,0,0,,${lines(c.text).join('\\N')}`).join('\n')}\n`;
 const assFile = path.join(work, 'captions.ass');
 writeFileSync(assFile, ass);
-const fade = `fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
-const enc = ['-c:v', 'libx264', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an'];
-execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-vf', fade, ...enc, path.join(out, 'reprodesk-demo.mp4')]);
+
+// voice track: every scene's narration placed at the moment its scene started, then loudness-normalized
+writeFileSync(path.join(work, 'timeline.json'), JSON.stringify(timeline));
+const narration = path.join(work, 'narration.wav');
+execFileSync(voice.py, [path.join(here, 'narrate.py'), 'mix', path.join(voiceDir, 'manifest.json'), path.join(work, 'timeline.json'), narration, String(dur)]);
+const vfade = `fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
+const afilt = `loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,afade=t=in:st=0:d=0.3,afade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
+const enc = ['-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '1', '-movflags', '+faststart', '-shortest'];
+execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-i', narration, '-vf', vfade, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo.mp4')]);
 const fontDir = '/usr/share/fonts/opentype/inter';
-execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-vf', `pad=${W}:${TH}:0:0:color=0x0E1A2B,subtitles=${assFile}:fontsdir=${fontDir},${fade}`, ...enc, path.join(out, 'reprodesk-demo-subtitles.mp4')]);
-console.log(`film done: ${dur.toFixed(1)} s, ${cues.length} captions -> docs/demo/reprodesk-demo.mp4, reprodesk-demo-subtitles.mp4, reprodesk-demo.en.srt`);
-rmSync(work, { recursive: true, force: true });
+execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-i', narration, '-vf', `subtitles=${assFile}:fontsdir=${fontDir},${vfade}`, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo-subtitles.mp4')]);
+console.log(`film done: ${dur.toFixed(1)} s, ${caps.length} captions -> docs/demo/reprodesk-demo.mp4 (voice), reprodesk-demo-subtitles.mp4 (voice + captions), reprodesk-demo.en.srt`);
+if (!process.env.FILM_KEEP) rmSync(work, { recursive: true, force: true });

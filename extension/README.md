@@ -19,7 +19,7 @@ Privacy-first bug capture for enterprise web QA (Chrome Manifest V3). Implements
 
 A bundled design system (Inter, Lucide icons, light/dark, state-aware status card, rolling-buffer meter, live-following timeline, polished exports) is described in `docs/DESIGN.md`.
 A presentation kit - demo shop with two deliberate bugs, a talk track (`docs/DEMO_SCRIPT.md`), screenshots and a screen recording of the whole run (`docs/demo/`) - is in the repo:
-`npm run demo:site` serves the shop, `npm run demo:shoot` regenerates the screenshots and `npm run demo:film` the walkthrough videos (`docs/demo/reprodesk-demo.mp4` clean, `reprodesk-demo-subtitles.mp4` with English captions, `reprodesk-demo.en.srt`).
+`npm run demo:site` serves the shop, `npm run demo:shoot` regenerates the screenshots and `npm run demo:film` the narrated walkthrough videos (`docs/demo/reprodesk-demo.mp4` with English voice-over, `reprodesk-demo-subtitles.mp4` with voice-over and YouTube-style captions, `reprodesk-demo.en.srt`; credits in `docs/demo/CREDITS.md`).
 
 ## Layout
 
