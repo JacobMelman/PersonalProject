@@ -12,6 +12,12 @@ Privacy-first bug capture for enterprise web QA (Chrome Manifest V3). Implements
 * **Review** page: replay, raw timeline, draft steps from observed actions, report fields, export to HTML / TXT / Markdown / DOCX / XLSX / ZIP Evidence Package.
 * Data minimisation by construction: no keyboard events, no clipboard, no editable values, URLs reduced to origin + path, no audio/mic/camera, everything local.
 
+## Design & demo
+
+A bundled design system (Inter, Lucide icons, light/dark, state-aware status card, rolling-buffer meter, live-following timeline, polished exports) is described in `docs/DESIGN.md`.
+A presentation kit - demo shop with two deliberate bugs, a talk track (`docs/DEMO_SCRIPT.md`), screenshots and a screen recording of the whole run (`docs/demo/`) - is in the repo:
+`npm run demo:site` serves the shop, `npm run demo:shoot` regenerates all visuals.
+
 ## Layout
 
 ```

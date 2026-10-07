@@ -11,14 +11,14 @@ let healthTimer: ReturnType<typeof setInterval> | null = null;
 const emit = (e: OffscreenEvent) => void chrome.runtime.sendMessage(e).catch(() => undefined);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function startRecorder(streamId: string, settings: Settings): Promise<void> {
+async function startRecorder(streamId: string, settings: Settings, size?: { width: number; height: number }): Promise<void> {
   await recorder?.stop();
   recorder = new RingRecorder(settings, {
     onEnded: (reason) => emit({ kind: 'off-event', ev: 'ended', reason }),
     onError: (reason) => emit({ kind: 'off-event', ev: 'error', reason }),
     onStarted: (codec, width, height) => emit({ kind: 'off-event', ev: 'started', codec, width, height }),
   });
-  await recorder.start(streamId);
+  await recorder.start(streamId, size);
   if (healthTimer) clearInterval(healthTimer);
   healthTimer = setInterval(() => {
     // Offscreen documents only have chrome.runtime, so health goes through IndexedDB (does not wake the service worker).
@@ -29,7 +29,7 @@ async function startRecorder(streamId: string, settings: Settings): Promise<void
 async function handle(op: OffscreenOp): Promise<unknown> {
   switch (op.op) {
     case 'start':
-      await startRecorder(op.streamId, op.settings);
+      await startRecorder(op.streamId, op.settings, op.size);
       return { ok: true };
     case 'stop':
       if (healthTimer) clearInterval(healthTimer);

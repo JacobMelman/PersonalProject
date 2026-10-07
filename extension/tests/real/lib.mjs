@@ -41,7 +41,7 @@ export const shot = (file) => execFileSync('import', ['-window', 'root', file], 
 export async function launchChrome({ userData, port = 9333, startUrl = 'about:blank', extraArgs = [], width = 1400, height = 900, loadExtension = true, webgl = false }) {
   mkdirSync(path.join(userData, 'Default'), { recursive: true });
   const prefs = path.join(userData, 'Default', 'Preferences');
-  if (!existsSync(prefs)) writeFileSync(prefs, JSON.stringify({ extensions: { pinned_extensions: [keyInfo.id] }, browser: { has_seen_welcome_page: true } }));
+  if (!existsSync(prefs)) writeFileSync(prefs, JSON.stringify({ extensions: { pinned_extensions: [keyInfo.id] }, browser: { has_seen_welcome_page: true }, credentials_enable_service: false, profile: { password_manager_enabled: false }, autofill: { credit_card_enabled: false, profile_enabled: false } }));
   const args = [
     `--user-data-dir=${userData}`, `--remote-debugging-port=${port}`, '--no-first-run', '--no-default-browser-check', '--no-sandbox',
     `--window-position=0,0`, `--window-size=${width},${height}`, '--disable-features=Translate,MediaRouter', '--password-store=basic',
@@ -108,14 +108,14 @@ export async function findPage(port, startsWith) {
 
 /** Real mouse click on a DOM element: its rect is translated to screen coordinates and clicked with xdotool. */
 export async function realClick(page, selector) {
-  const r = await page.eval(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, sx: window.screenX, sy: window.screenY, top: window.outerHeight - window.innerHeight - 4, left: 4 }; })()`);
+  const r = await page.eval(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: 'center', behavior: 'instant' }); const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, sx: window.screenX, sy: window.screenY, top: window.outerHeight - window.innerHeight - 4, left: 4 }; })()`);
   xdo('mousemove', String(Math.round(r.sx + r.left + r.x)), String(Math.round(r.sy + r.top + r.y)));
   await sleep(120);
   xdo('click', '1');
   await sleep(250);
 }
 
-/** Finds the pinned ReproDesk icon by its red record dot in the toolbar band (the toolbar layout shifts: side panel, download button, ...). */
+/** Finds the pinned ReproDesk icon by its indigo brand tile in the toolbar band (the toolbar layout shifts: side panel, download button, ...). */
 export function locateToolbarIcon() {
   const f = path.join(tmpdir(), `rd-toolbar-${process.pid}.png`);
   shot(f);
@@ -125,8 +125,13 @@ im = Image.open(${JSON.stringify(f)}).convert('RGB'); px = im.load(); xs = []
 for y in range(48, 80):
     for x in range(700, im.size[0]):
         r,g,b = px[x,y]
-        if abs(r-229)<12 and abs(g-57)<12 and abs(b-53)<12: xs.append(x)
-print(round(sum(xs)/len(xs)) if xs else -1)`]).toString().trim();
+        if 30<=r<=115 and 50<=g<=140 and 190<=b<=255 and b-g>=60: xs.append(x)  # the indigo brand tile
+xs.sort(); cl = []
+for x in xs:
+    if cl and x - cl[-1][-1] <= 6: cl[-1].append(x)
+    else: cl.append([x])
+cl = [c for c in cl if len(c) >= 40]
+print(round(sum(cl[0]) / len(cl[0])) if cl else -1)`]).toString().trim();
   return Number(out);
 }
 export const clickToolbarIcon = async () => {
@@ -138,7 +143,7 @@ export const clickToolbarIcon = async () => {
 };
 
 /** Exports the Evidence Package ZIP of a session through the real Review page and returns the saved file path. */
-export async function exportZip(port, sessionId, dir) {
+export async function exportZip(port, sessionId, dir, fmt = 'zip') {
   const { mkdirSync, readdirSync, rmSync } = await import('node:fs');
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -147,8 +152,16 @@ export async function exportZip(port, sessionId, dir) {
   const rv = await openBackgroundPage(port, `chrome-extension://${keyInfo.id}/review.html?session=${encodeURIComponent(sessionId)}`);
   for (let i = 0; i < 40; i++) { if (await rv.eval(`!!document.getElementById('export')`)) break; await sleep(500); }
   await sleep(1500);
-  await rv.eval(`document.querySelectorAll('[data-fmt]').forEach((c) => (c.checked = c.dataset.fmt === 'zip')); document.getElementById('export').click();`, { gesture: true });
-  for (let i = 0; i < 60; i++) { const f = readdirSync(dir).find((x) => x.endsWith('.zip')); if (f) { await sleep(800); rv.close(); b.close(); return path.join(dir, f); } await sleep(500); }
+  await rv.eval(`document.querySelectorAll('[data-fmt]').forEach((c) => (c.checked = c.dataset.fmt === ${JSON.stringify(fmt)})); document.getElementById('export').click();`, { gesture: true });
+  for (let i = 0; i < 60; i++) { const f = readdirSync(dir).find((x) => x.endsWith('.' + fmt)); if (f) { await sleep(800); rv.close(); b.close(); return path.join(dir, f); } await sleep(500); }
   rv.close(); b.close();
   return null;
+}
+
+/** Real mouse click on an element inside the side panel (panel content origin on a 1400x900 window with the default layout). */
+export async function panelClick(panel, selector, origin = { x: 1027, y: 121 }) {
+  const r = await panel.eval(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+  xdo('mousemove', String(Math.round(origin.x + r.x)), String(Math.round(origin.y + r.y)));
+  await sleep(150);
+  xdo('click', '1');
 }

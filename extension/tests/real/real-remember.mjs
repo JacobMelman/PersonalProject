@@ -1,6 +1,6 @@
 // "Remember this site": the genuine Chrome permission prompt, persistent content-script registration, and what it buys
 // (collection survives full-page navigations and foreign detours without clicking the icon again).
-import { keyInfo, startDisplay, launchChrome, newReporter, tmpProfile, rmProfile, sleep, xdo, findPage, realClick, clickToolbarIcon, shot, root } from './lib.mjs';
+import { panelClick, keyInfo, startDisplay, launchChrome, newReporter, tmpProfile, rmProfile, sleep, xdo, findPage, realClick, clickToolbarIcon, shot, root } from './lib.mjs';
 import { startSites } from './site.mjs';
 import { makeProbe } from './probe.mjs';
 import path from 'node:path';
@@ -25,7 +25,8 @@ try {
   ok('armed', !!(await probe.until(async () => (await probe.state())?.mode === 'armed', 10000)));
   await sleep(1500);
   // genuine click on "Remember this site" in the side panel -> Chrome's own permission bubble
-  xdo('mousemove', '1308', '385'); await sleep(200); xdo('click', '1'); await sleep(1500);
+  const panel = await findPage(PORT, 'chrome-extension://' + keyInfo.id + '/sidepanel.html');
+  await panelClick(panel, '#remember'); await sleep(1500);
   shot(path.join(OUT, '40-permission-prompt.png'));
   xdo('mousemove', '676', '260'); await sleep(200); xdo('click', '1'); // Allow
   const granted = await probe.until(async () => (await probe.p.eval(`chrome.permissions.getAll().then((p) => p.origins)`)).some((o) => o.includes(`localhost:${SITE}`)), 6000);

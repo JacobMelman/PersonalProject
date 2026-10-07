@@ -49,15 +49,21 @@ export class RingRecorder {
     this.settings = s;
   }
 
-  async start(streamId: string): Promise<void> {
+  async start(streamId: string, size?: { width: number; height: number }): Promise<void> {
+    // Capture at the tab's own size (aspect preserved, capped at 1080p) so the video has no bars; Chrome treats max* as the target size.
+    const fit = (() => {
+      const w0 = size?.width || 1920, h0 = size?.height || 1080;
+      const k = Math.min(1, 1920 / w0, 1080 / h0);
+      return { w: Math.max(2, Math.round((w0 * k) / 2) * 2), h: Math.max(2, Math.round((h0 * k) / 2) * 2) };
+    })();
     const constraints = {
       audio: false, // baseline: video only, no tab audio / microphone / camera
       video: {
         mandatory: {
           chromeMediaSource: 'tab',
           chromeMediaSourceId: streamId,
-          maxWidth: 1920,
-          maxHeight: 1080,
+          maxWidth: fit.w,
+          maxHeight: fit.h,
           maxFrameRate: this.settings.fps,
         },
       },

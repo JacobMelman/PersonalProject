@@ -139,7 +139,7 @@ export function buildReportModel(inp: BuildInput): ReportModel {
 
 export const defaultTitle = (s: SessionRecord): string => {
   const kind = SESSION_TYPE[s.kind] ?? 'Capture';
-  return `${kind} - ${s.targetOrigin ?? 'target'} - ${new Date(s.startedAt).toLocaleString()}`;
+  return `${kind} on ${(s.targetOrigin ?? 'target').replace(/^https?:\/\//, '')}`;
 };
 
 export function pngSize(data: Uint8Array): { width: number; height: number } {

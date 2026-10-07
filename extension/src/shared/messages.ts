@@ -23,7 +23,7 @@ export interface CommandMessage {
 
 /** Service worker -> offscreen document. */
 export type OffscreenOp =
-  | { kind: 'off'; op: 'start'; streamId: string; settings: Settings }
+  | { kind: 'off'; op: 'start'; streamId: string; settings: Settings; size?: { width: number; height: number } }
   | { kind: 'off'; op: 'stop' }
   | { kind: 'off'; op: 'pause' }
   | { kind: 'off'; op: 'resume' }

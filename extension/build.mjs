@@ -16,6 +16,7 @@ const common = {
   minifySyntax: true, // drops the E2E-only test hook from release builds
   logLevel: 'info',
   define: { __E2E__: JSON.stringify(e2e) },
+  loader: { '.svg': 'text' },
 };
 
 await build({
@@ -34,6 +35,7 @@ for (const f of ['sidepanel.html', 'review.html', 'offscreen.html', 'styles.css'
   cpSync(new URL(`./public/${f}`, import.meta.url).pathname, outdir + f);
 }
 cpSync(new URL('./public/icons', import.meta.url).pathname, outdir + 'icons', { recursive: true });
+cpSync(new URL('./public/fonts', import.meta.url).pathname, outdir + 'fonts', { recursive: true });
 
 const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
 const keyFile = new URL('./manifest.key.json', import.meta.url);

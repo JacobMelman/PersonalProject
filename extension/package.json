@@ -14,7 +14,10 @@
     "demo": "node scripts/demo.mjs",
     "test:real": "node build.mjs && node tests/real/real-flow.mjs && node tests/real/real-lifecycle.mjs && node tests/real/real-screenshot.mjs && node tests/real/real-remember.mjs && node tests/real/real-popup.mjs && node tests/real/real-complex.mjs",
     "soak:armed": "node build.mjs && node tests/real/soak.mjs armed 40",
-    "soak:repro": "node build.mjs && node tests/real/soak.mjs repro 31"
+    "soak:repro": "node build.mjs && node tests/real/soak.mjs repro 31",
+    "demo:site": "node scripts/demo-site.mjs",
+    "demo:app": "node scripts/make-demo-app.mjs",
+    "demo:shoot": "node build.mjs && node scripts/shoot.mjs --video"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.4",
@@ -25,8 +28,10 @@
     "vitest": "^5.0.3"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
     "docx": "^9.9.0",
     "fflate": "^0.8.3",
+    "lucide-static": "^1.52.0",
     "mediabunny": "^1.61.3"
   }
 }

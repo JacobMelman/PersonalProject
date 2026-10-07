@@ -1,10 +1,14 @@
 import { collecting, displayState, initialState } from '../shared/state';
 import { getSettings, saveSettings } from '../shared/settings';
 import { formatClock } from '../shared/filename';
-import { dbGet, dbGetAll } from '../storage/db';
+import { dbGet, dbGetAll, dbIndexAll, eventsOfSession } from '../storage/db';
 import { storageEstimate } from '../storage/opfs';
+import { sessionThumb } from '../report/thumb';
 import type { CommandMessage } from '../shared/messages';
-import type { CaptureState, HealthSnapshot, SessionRecord, Settings } from '../shared/types';
+import type { CaptureState, DisplayCode, HealthSnapshot, ScreenshotItem, SessionRecord, Settings, TimelineEvent } from '../shared/types';
+import { icon, type IconName } from '../ui/icons';
+import { logo } from '../ui/brand';
+import { ago, bytes, duration, esc, host } from '../ui/format';
 
 const app = document.getElementById('app')!;
 let state: CaptureState = initialState();
@@ -16,13 +20,25 @@ let codecInfo = '';
 let storageInfo = '';
 let remembered = false;
 let swStarts = 0;
+let view: 'main' | 'settings' = 'main';
+let markerLabel = '';
+let shotCount = 0;
+const meta = new Map<string, { thumb: string | null; markers: number; shots: number }>();
+let lastSig = '';
 
-const GLYPH: Record<string, string> = {
-  inactive: '○', armed: '◉', recording: '●', screenshot_only: '▣', privacy_paused: '⏸', manual_paused: '⏸', afk: '☾', target_ended: '■', error: '⚠',
+const HEAD: Record<DisplayCode, { icon: IconName; title: string; sub: string }> = {
+  inactive: { icon: 'power', title: 'Ready when you are', sub: 'Not capturing anything' },
+  armed: { icon: 'circle-dot', title: 'Rolling buffer is on', sub: 'Only this tab is recorded' },
+  recording: { icon: 'video', title: 'Recording session', sub: 'Markers and screenshots on tap' },
+  screenshot_only: { icon: 'camera', title: 'Screenshots only', sub: 'No video is being recorded' },
+  privacy_paused: { icon: 'eye-off', title: 'Paused: left the target', sub: 'Nothing from other tabs is stored' },
+  manual_paused: { icon: 'pause', title: 'Paused by you', sub: 'Resume when you are ready' },
+  afk: { icon: 'moon', title: 'Away: capture suspended', sub: 'Resumes when you are back' },
+  target_ended: { icon: 'square', title: 'Target ended', sub: 'Evidence so far is frozen' },
+  error: { icon: 'triangle-alert', title: 'Not recording', sub: 'The capture pipeline needs attention' },
 };
 
 const cmd = (c: CommandMessage['cmd'], payload?: Record<string, unknown>) => chrome.runtime.sendMessage({ kind: 'cmd', cmd: c, payload } satisfies CommandMessage);
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 /** The panel never trusts button state: if the capture pipeline stops reporting, it says so (spec PRIV-03 / State trust). */
 function effectiveDisplay() {
@@ -33,108 +49,206 @@ function effectiveDisplay() {
   return d;
 }
 
+const kbds = (keys: string[]) => `<span class="kbd">${keys.map((k) => `<kbd>${k}</kbd>`).join('')}</span>`;
+function tile(c: string, ic: IconName, title: string, sub: string, opts: { primary?: boolean; danger?: boolean; keys?: string[]; compact?: boolean; disabled?: boolean } = {}): string {
+  return `<button class="action ${opts.primary ? 'primary' : ''} ${opts.danger ? 'danger' : ''} ${opts.compact ? 'compact' : ''}"${opts.disabled ? ' disabled' : ''} data-c="${c}"${opts.keys ? ` title="Shortcut: ${opts.keys.join('+')}"` : ''}>
+    <span class="action__icon">${icon(ic)}</span><span><div class="action__t">${title}</div><div class="action__s">${sub}</div></span>${opts.keys ? kbds(opts.keys) : ''}</button>`;
+}
+
+function statusBadge(s: SessionRecord): string {
+  if (s.status === 'finished') return '<span class="badge ok">Saved</span>';
+  if (s.status === 'active') return '<span class="badge live">Live</span>';
+  if (s.status === 'target_ended') return '<span class="badge bad">Target ended</span>';
+  return '<span class="badge warn">Recovered</span>';
+}
+const KIND: Record<string, { icon: IconName; name: string }> = { instant: { icon: 'history', name: 'Instant Replay' }, repro: { icon: 'video', name: 'Repro Session' }, screenshot: { icon: 'camera', name: 'Screenshots' } };
+
 function render(): void {
   const d = effectiveDisplay();
+  const head = HEAD[d.code];
   const active = state.mode !== 'inactive';
   const term = !!state.terminal;
   const repro = state.mode === 'repro';
   const shot = state.mode === 'screenshot_only';
   const elapsed = state.reproStartedAt && !term ? formatClock(Date.now() - state.reproStartedAt) : '';
-  const o = (v: string | number, cur: string | number) => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${v}</option>`;
+  const ringSec = Math.min(settings.replaySec, (health?.ringSegments ?? 0) * 2);
+  const ticks = 30;
+  const on = Math.ceil((ringSec / settings.replaySec) * ticks);
   const recovered = sessions.filter((s) => s.status === 'recovered' && !s.reviewedAt);
-  app.innerHTML = `
-  <h1>ReproDesk <span class="muted small">Phase 0 spike</span></h1>
-  <div class="status" data-code="${d.code}" role="status" aria-live="polite">
-    <span class="glyph" aria-hidden="true">${GLYPH[d.code]}</span><span class="label">${esc(d.label)}</span><span class="timer">${elapsed}</span>
-  </div>
-  ${state.reason && term ? `<div class="notice error">${esc(state.reason)}</div>` : ''}
-  ${active ? `<div class="muted small" style="margin-top:6px">Target: <b>${esc(state.targetOrigin ?? '?')}</b>${state.mode === 'screenshot_only' ? ' (video off)' : ''}</div>` : '<p class="muted">Not armed. Open the approved web app, then <b>click the ReproDesk toolbar icon</b> on that tab to arm it. Chrome only allows tab capture after that explicit user action.</p>'}
-  ${notice && Date.now() - notice.at < 9000 ? `<div class="notice ${notice.level}">${esc(notice.text)}</div>` : ''}
-  ${state.afk && state.afkNeedsResume ? '<div class="notice warn">You were away. The Repro Session does not restart on its own.</div>' : ''}
-  <div class="grid">
-    ${term ? '<button class="wide" data-c="ackTerminal">Dismiss / re-arm later</button>' : ''}
-    ${active && !term && !repro && !shot ? '<button data-c="saveReplay">Save Last Replay</button><button data-c="startRepro">Start Repro Session</button>' : ''}
-    ${repro && !term ? '<button data-c="marker">Add Marker</button><button class="danger" data-c="finishRepro">Finish</button>' : ''}
-    ${shot && !term ? (state.sessionId ? '<button class="danger wide" data-c="finishRepro">Finish screenshot session</button>' : '<button class="wide" data-c="startRepro">Start screenshot session</button>') : ''}
-    ${active && !term ? '<button data-c="screenshot" class="secondary">Screenshot</button>' : ''}
-    ${active && !term && !shot ? (state.manual ? '<button data-c="manualResume">Resume</button>' : '<button class="secondary" data-c="manualPause">Pause</button>') : ''}
-    ${state.afk && state.afkNeedsResume ? '<button class="wide" data-c="resumeFromAfk">Resume recording</button>' : ''}
-    ${active && !term && !repro && state.shotSessionId ? '<button class="secondary wide" data-c="finishShotSession">Finish screenshot collection &amp; open Review</button>' : ''}
-    ${active && !repro ? '<button class="secondary wide" data-c="disarm">Disarm</button>' : ''}
-  </div>
-  ${active && !term && !remembered ? '<div class="row small"><span class="muted">Navigations may need host access to keep capturing.</span><button class="secondary" id="remember">Remember this site</button></div>' : ''}
-  ${recovered.map((s) => `<div class="card"><b>Recovered Session</b> - recording ended unexpectedly. Last committed: ${s.lastCommittedAt ? new Date(s.lastCommittedAt).toLocaleTimeString() : 'n/a'}<div class="grid"><button data-review="${s.id}">Review</button><button class="secondary" data-del="${s.id}">Delete</button></div></div>`).join('')}
-  <h2>Sessions</h2>
-  ${sessions.length ? sessions.slice(0, 8).map((s) => `<div class="sess"><div class="meta"><b>${esc(s.kind)} - ${esc(s.status)}</b><span class="muted small">${new Date(s.startedAt).toLocaleString()}</span></div><button class="secondary" data-review="${s.id}">Review</button><button class="secondary" data-del="${s.id}" title="Delete">✕</button></div>`).join('') : '<p class="muted small">No saved sessions yet.</p>'}
-  <details><summary>Target Profile &amp; settings</summary>
-    <label>Instant Replay window (s)</label><select data-s="replaySec">${[30, 60, 90, 120].map((v) => o(v, settings.replaySec)).join('')}</select>
-    <label>Post-trigger tail (s)</label><select data-s="tailSec">${[0, 3, 5, 10].map((v) => o(v, settings.tailSec)).join('')}</select>
-    <label>Pre-session context (s)</label><select data-s="preSessionSec">${[0, 30].map((v) => o(v, settings.preSessionSec)).join('')}</select>
-    <label>AFK after idle (min, 0 = AFK off; locked screen is immediate)</label><select data-s="afkMinutes">${[0, 5, 10, 15, 30].map((v) => o(v, settings.afkMinutes)).join('')}</select>
-    <label>Frame rate</label><select data-s="fps">${[5, 10, 15, 24, 30].map((v) => o(v, settings.fps)).join('')}</select>
-    <label>Bitrate (kbps)</label><select data-s="bitrateKbps">${[600, 1000, 1500, 2500, 4000].map((v) => o(v, settings.bitrateKbps)).join('')}</select>
-    <label>Environment</label><input type="text" data-s="environment" value="${esc(settings.environment)}">
-    <label>Extra approved origins (comma separated, semantic scope)</label><input type="text" data-s="approvedOrigins" value="${esc(settings.approvedOrigins.join(', '))}" placeholder="https://auth.example.com">
-    <div class="row"><span>Marker auto-screenshot</span><input type="checkbox" data-sb="markerScreenshot" ${settings.markerScreenshot ? 'checked' : ''}></div>
-    <div class="row"><span>Video capture (off = Screenshot-only, applies when arming)</span><input type="checkbox" data-sb="captureVideo" ${settings.captureVideo ? 'checked' : ''}></div>
-    <div class="row"><span>Open Review after saving</span><input type="checkbox" data-sb="openReviewAfterSave" ${settings.openReviewAfterSave ? 'checked' : ''}></div>
-    <p class="muted small">Shortcuts: Alt+Shift+R save replay, Alt+Shift+M marker, Alt+Shift+S screenshot. Chrome allows only 3 default keys per extension: assign \"start / finish session\" yourself at chrome://extensions/shortcuts.</p>
-  </details>
-  <details><summary>Diagnostics (Phase 0 measurements)</summary>
-    <pre class="diag" id="diag">${esc(diagText())}</pre>
-    <div class="row"><button class="secondary" id="copydiag">Copy diagnostics JSON</button></div>
-  </details>`;
-  bind();
+  const sub = state.terminal && state.reason ? '' : head.sub;
+  const active_ = document.activeElement as HTMLInputElement | null;
+  const refocus = active_?.id === 'markerLabel' ? { start: active_.selectionStart, end: active_.selectionEnd } : null;
+
+  let body = '';
+  if (view === 'settings') body = settingsView();
+  else {
+    body += `<div class="hero" data-code="${d.code}" role="status" aria-live="polite">
+      <div class="hero__row"><span class="hero__badge">${icon(head.icon)}</span>
+        <div style="flex:1;min-width:0"><div class="hero__top"><div class="eyebrow">${esc(d.label)}</div><span class="hero__timer timer">${elapsed}</span></div><div class="hero__label">${head.title}</div><div class="hero__sub">${sub}</div></div></div>
+      ${state.reason && term ? `<div class="hero__reason">${esc(state.reason)}</div>` : ''}
+      ${active ? `<div class="hero__target">${icon('globe')}<span>Target</span><b>${esc(host(state.targetOrigin))}</b>${shot ? '<span class="pill accent" style="margin-left:auto">video off</span>' : ''}</div>` : ''}
+      ${active && !shot && !repro && !term ? `<div class="meter"><div class="meter__head"><span>Rolling buffer</span><b>${ringSec}s of ${settings.replaySec}s</b></div><div class="meter__bar">${Array.from({ length: ticks }, (_, i) => `<i class="${i < on ? 'on' : ''}"></i>`).join('')}</div></div>` : ''}
+      ${repro && !term ? `<div class="meter"><div class="meter__head"><span>This session</span><b>${state.markerCount} marker${state.markerCount === 1 ? '' : 's'} · ${shotCount} screenshot${shotCount === 1 ? '' : 's'}</b></div></div>` : ''}
+    </div>
+    <div class="trust"><span class="chip">${icon('shield-check')}Local only</span><span class="chip">${icon('keyboard')}No keystrokes</span><span class="chip">${icon('monitor')}This tab only</span></div>`;
+
+    if (state.afk && state.afkNeedsResume) body += `<div class="section"><div class="actions">${tile('resumeFromAfk', 'play', 'Resume recording', 'You were away. The session does not restart on its own.', { primary: true })}</div></div>`;
+    if (!active) {
+      body += `<div class="section"><div class="card" style="padding:16px"><div style="display:flex;gap:12px;align-items:flex-start"><span class="action__icon" style="width:38px;height:38px">${icon('mouse-pointer-click')}</span><div><div class="action__t" style="font-size:14px">Arm it on the app you test</div><p class="muted" style="margin-top:4px">Open the web app, then <b>click the ReproDesk icon in the toolbar</b>. Chrome only allows tab capture after that explicit action, so nothing can start silently.</p></div></div></div></div>`;
+    } else if (term) {
+      body += `<div class="section"><div class="actions"><button class="btn primary wide" data-c="ackTerminal" style="height:38px">Dismiss</button></div></div>`;
+    } else if (repro) {
+      body += `<div class="section"><h2>Session</h2><div class="markerline"><input class="input" id="markerLabel" placeholder="Name this marker (optional)" value="${esc(markerLabel)}" maxlength="80"></div>
+        <div class="actions">${tile('marker', 'flag', 'Add marker', state.manual || state.privacy ? 'Unavailable while paused' : 'Flag this moment · screenshot included', { primary: true, keys: ['Alt', 'Shift', 'M'], disabled: state.manual || state.privacy })}
+        <div class="actions two">${tile('screenshot', 'camera', 'Screenshot', 'Current view', { compact: true })}${state.manual ? tile('manualResume', 'play', 'Resume', 'Continue capture', { compact: true }) : tile('manualPause', 'pause', 'Pause', 'Stop collecting', { compact: true })}</div>
+        ${tile('finishRepro', 'square', 'Finish & review', 'Stop and open the report', { danger: true })}</div></div>`;
+    } else if (shot) {
+      body += `<div class="section"><h2>Capture</h2><div class="actions">${tile('screenshot', 'camera', 'Take screenshot', 'With target, time and safe context', { primary: true, keys: ['Alt', 'Shift', 'S'] })}
+        ${state.sessionId || state.shotSessionId ? tile(state.sessionId ? 'finishRepro' : 'finishShotSession', 'square', 'Finish screenshot session', 'Open the report', { danger: true }) : tile('startRepro', 'layers', 'Start screenshot session', 'Group screenshots into one report')}
+        <button class="btn ghost wide" data-c="disarm">${icon('power')}Disarm</button></div></div>`;
+    } else {
+      body += `<div class="section"><h2>Capture</h2><div class="actions">
+        ${tile('saveReplay', 'history', 'Save last replay', `Freeze the last ${settings.replaySec} s + ${settings.tailSec} s tail`, { primary: true, keys: ['Alt', 'Shift', 'R'] })}
+        ${tile('startRepro', 'video', 'Start Repro Session', `Record the full path${settings.preSessionSec ? ` · keeps ${settings.preSessionSec} s before` : ''}`)}
+        <div class="actions two">${tile('screenshot', 'camera', 'Screenshot', 'Current view', { compact: true })}${state.manual ? tile('manualResume', 'play', 'Resume', 'Continue capture', { compact: true }) : tile('manualPause', 'pause', 'Pause', 'Stop collecting', { compact: true })}</div>
+        <button class="btn ghost wide" data-c="disarm">${icon('power')}Disarm</button></div></div>`;
+      if (state.shotSessionId) body += `<div class="section"><button class="btn wide" data-c="finishShotSession">${icon('image')}Finish screenshot collection &amp; open report</button></div>`;
+    }
+    if (active && !term && !remembered) body += `<div class="remember">${icon('lock')}<span>Keep capturing across reloads &amp; SSO</span><button class="btn sm" id="remember">Remember site</button></div>`;
+    body += recovered.map((s) => `<div class="recovered"><b>${icon('triangle-alert')}Recovered session</b><p class="small muted" style="margin:4px 0 9px">Recording ended unexpectedly. Last committed ${s.lastCommittedAt ? new Date(s.lastCommittedAt).toLocaleTimeString() : 'n/a'}.</p><div style="display:flex;gap:8px"><button class="btn sm primary" data-review="${s.id}">Review</button><button class="btn sm" data-del="${s.id}">Delete</button></div></div>`).join('');
+    body += `<div class="section"><h2>Recent sessions <span class="count">${sessions.length ? `· ${sessions.length}` : ''}</span><span style="margin-left:auto;text-transform:none;letter-spacing:0"><button class="btn ghost sm" data-nav="all" style="height:22px;padding:0 6px">View all ${icon('external-link')}</button></span></h2>
+      ${sessions.length ? `<div class="sessions">${sessions.slice(0, 4).map(sessionRow).join('')}</div>` : `<div class="empty">${icon('film')}<b>No sessions yet</b><span class="small">Saved replays and Repro Sessions appear here.</span></div>`}</div>`;
+  }
+  const toast = notice && Date.now() - notice.at < 9000 ? `<div class="toast ${notice.level}">${icon(notice.level === 'info' ? 'info' : 'triangle-alert')}<span>${esc(notice.text)}</span></div>` : '';
+  app.innerHTML = `<div class="panel">
+    <div class="topbar"><div class="brand">${logo(26)}<b>${view === 'settings' ? 'Settings' : 'Capture'}</b><span class="pill accent">Phase 0</span></div>
+      <button class="iconbtn ${view === 'settings' ? 'on' : ''}" data-nav="${view === 'settings' ? 'main' : 'settings'}" title="${view === 'settings' ? 'Back' : 'Settings & diagnostics'}" aria-label="Settings">${icon(view === 'settings' ? 'arrow-left' : 'settings')}</button></div>
+    ${body}${toast}</div>`;
+  if (refocus) {
+    const el = document.getElementById('markerLabel') as HTMLInputElement | null;
+    el?.focus();
+    el?.setSelectionRange(refocus.start, refocus.end);
+  }
+}
+
+function sessionRow(s: SessionRecord): string {
+  const m = meta.get(s.id);
+  const k = KIND[s.kind] ?? KIND.instant;
+  const dur = s.endedAt ? duration(s.endedAt - s.startedAt) : 'live';
+  const counts = `${m?.markers ? `<span>${icon('flag')}${m.markers}</span>` : ''}${m?.shots ? `<span>${icon('camera')}${m.shots}</span>` : ''}`;
+  return `<div class="session"><div class="thumb ${s.kind}">${m?.thumb ? `<img src="${m.thumb}" alt="">` : icon(k.icon)}</div>
+    <div class="session__body"><div class="session__t"><span>${k.name}</span>${statusBadge(s)}</div><div class="session__m"><span>${ago(s.createdAt)}</span><span class="dotsep">·</span><span class="num">${dur}</span>${counts}</div></div>
+    <div class="session__act"><button class="iconbtn" data-review="${s.id}" title="Open report" aria-label="Open report">${icon('external-link')}</button><button class="iconbtn" data-del="${s.id}" title="Delete" aria-label="Delete">${icon('trash-2')}</button></div></div>`;
+}
+
+function seg(key: keyof Settings, values: Array<[number, string]>): string {
+  return `<div class="seg" role="group">${values.map(([v, l]) => `<button data-seg="${key}" data-v="${v}" class="${Number(settings[key]) === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+}
+const sw = (key: keyof Settings) => `<label class="switch"><input type="checkbox" data-sb="${key}" ${settings[key] ? 'checked' : ''}><span></span></label>`;
+const row = (t: string, s: string, ctl: string) => `<div class="setrow"><div><div class="t">${t}</div><div class="s">${s}</div></div>${ctl}</div>`;
+
+function settingsView(): string {
+  const h = health;
+  return `<div class="section" style="margin-top:4px"><h2>Capture</h2><div class="card drawer">
+    ${row('Replay window', 'How much is kept while Armed', seg('replaySec', [[30, '30s'], [60, '60s'], [90, '90s'], [120, '120s']]))}
+    ${row('Post-trigger tail', 'Recorded after you press Save', seg('tailSec', [[0, '0'], [3, '3s'], [5, '5s'], [10, '10s']]))}
+    ${row('Pre-session context', 'Kept before a Repro Session starts', seg('preSessionSec', [[0, 'Off'], [30, '30s']]))}
+    ${row('AFK suspend', 'After this idle time (locked = immediately)', seg('afkMinutes', [[0, 'Off'], [5, '5m'], [10, '10m'], [15, '15m'], [30, '30m']]))}
+    ${row('Marker screenshots', 'Capture a screenshot with every marker', sw('markerScreenshot'))}
+    ${row('Video capture', 'Off = Screenshot-only (applies when arming)', sw('captureVideo'))}
+    ${row('Open report after saving', 'Jump straight to Review', sw('openReviewAfterSave'))}</div></div>
+    <div class="section"><h2>Target profile</h2><div class="card drawer">
+    <div class="field" style="margin-top:10px"><label>Environment</label><input class="input" type="text" data-s="environment" value="${esc(settings.environment)}"></div>
+    <div class="field"><label>Extra approved origins</label><input class="input" type="text" data-s="approvedOrigins" value="${esc(settings.approvedOrigins.join(', '))}" placeholder="https://auth.example.com"><span class="hint">Comma separated. Same Target Profile, semantic scope only.</span></div></div></div>
+    <div class="section"><h2>Quality</h2><div class="card drawer">
+    ${row('Frame rate', 'Frames per second', seg('fps', [[5, '5'], [10, '10'], [15, '15'], [24, '24'], [30, '30']]))}
+    ${row('Bitrate', 'Video quality vs. size', seg('bitrateKbps', [[600, '0.6'], [1000, '1'], [1500, '1.5'], [2500, '2.5'], [4000, '4']]))}</div></div>
+    <div class="section"><h2>Shortcuts</h2><div class="card drawer">
+    ${row('Save last replay', '', kbds(['Alt', 'Shift', 'R']))}${row('Add marker', '', kbds(['Alt', 'Shift', 'M']))}${row('Screenshot', '', kbds(['Alt', 'Shift', 'S']))}
+    ${row('Start / finish session', 'Assign at chrome://extensions/shortcuts', '<span class="faint small">unassigned</span>')}</div></div>
+    <div class="section"><h2>Diagnostics</h2><div class="card drawer"><div class="kv" style="margin-top:10px">
+      <span>Frames encoded</span><span>${h?.framesEncoded ?? 0}</span><span>Dropped</span><span>${h?.framesDropped ?? 0}</span>
+      <span>Stream</span><span>${h?.codec ? `${h.codec.startsWith('vp09') ? 'VP9' : h.codec} ${h.width}×${h.height}` : '-'}</span>
+      <span>Media written</span><span>${bytes(h?.bytesWritten ?? 0)}</span><span>Offscreen heap</span><span>${h?.jsHeapMB ?? '-'} MB</span><span>Service worker starts</span><span>${swStarts}</span></div>
+      <pre class="diag" id="diag">${esc(diagText())}</pre><button class="btn sm" id="copydiag">${icon('copy')}Copy diagnostics JSON</button></div></div>`;
 }
 
 function diagText(): string {
   const h = health;
-  return JSON.stringify(
-    {
-      state: displayState(state).label, mode: state.mode, privacy: state.privacy, manual: state.manual, afk: state.afk,
-      health: h ? { ...h, ageMs: Date.now() - h.at, ringBytesMB: +(h.ringBytes / 1048576).toFixed(2), writtenMB: +(h.bytesWritten / 1048576).toFixed(2), fpsEncoded: undefined } : null,
-      storage: storageInfo, encoders: codecInfo, serviceWorkerStarts: swStarts, chromeUA: navigator.userAgent,
-    },
-    null,
-    2,
-  );
+  return JSON.stringify({
+    state: displayState(state).label, mode: state.mode, privacy: state.privacy, manual: state.manual, afk: state.afk,
+    health: h ? { ...h, ageMs: Date.now() - h.at, ringBytesMB: +(h.ringBytes / 1048576).toFixed(2), writtenMB: +(h.bytesWritten / 1048576).toFixed(2) } : null,
+    storage: storageInfo, encoders: codecInfo, serviceWorkerStarts: swStarts, chromeUA: navigator.userAgent,
+  }, null, 2);
 }
 
-function bind(): void {
-  app.querySelectorAll<HTMLButtonElement>('[data-c]').forEach((b) => (b.onclick = () => void cmd(b.dataset.c as CommandMessage['cmd'])));
-  app.querySelectorAll<HTMLButtonElement>('[data-review]').forEach((b) => (b.onclick = () => void cmd('openReview', { sessionId: b.dataset.review })));
-  app.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) => (b.onclick = async () => {
+app.addEventListener('click', async (e) => {
+  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c],[data-review],[data-del],[data-nav],[data-seg],#remember,#copydiag');
+  if (!t) return;
+  if (t.dataset.c) {
+    if (t.dataset.c === 'marker') {
+      void cmd('marker', { label: markerLabel });
+      markerLabel = '';
+      lastSig = '';
+      render();
+    } else void cmd(t.dataset.c as CommandMessage['cmd']);
+  } else if (t.dataset.review) void cmd('openReview', { sessionId: t.dataset.review });
+  else if (t.dataset.del) {
     if (confirm('Delete this session and its evidence from this browser?')) {
-      await chrome.runtime.sendMessage({ kind: 'delete-session', id: b.dataset.del });
+      await chrome.runtime.sendMessage({ kind: 'delete-session', id: t.dataset.del });
       await refreshSessions();
     }
-  }));
-  app.querySelectorAll<HTMLSelectElement | HTMLInputElement>('[data-s]').forEach((el) => (el.onchange = async () => {
-    const k = el.dataset.s as keyof Settings;
-    const raw = el.value;
-    const val = k === 'approvedOrigins' ? raw.split(',').map((x) => x.trim()).filter(Boolean) : k === 'environment' ? raw : Number(raw);
-    settings = await saveSettings({ [k]: val } as Partial<Settings>);
-  }));
-  app.querySelectorAll<HTMLInputElement>('[data-sb]').forEach((el) => (el.onchange = async () => {
-    settings = await saveSettings({ [el.dataset.sb as string]: el.checked } as Partial<Settings>);
-  }));
-  const rem = document.getElementById('remember');
-  if (rem) rem.onclick = async () => {
+  } else if (t.dataset.nav) {
+    if (t.dataset.nav === 'all') void chrome.tabs.create({ url: chrome.runtime.getURL('review.html') });
+    else {
+      view = t.dataset.nav as 'main' | 'settings';
+      lastSig = '';
+      render();
+    }
+  } else if (t.dataset.seg) {
+    settings = await saveSettings({ [t.dataset.seg]: Number(t.dataset.v) } as Partial<Settings>);
+    lastSig = '';
+    render();
+  } else if (t.id === 'remember') {
     if (!state.targetOrigin) return;
     const ok = await chrome.permissions.request({ origins: [`${state.targetOrigin}/*`] });
     if (ok) {
       await cmd('siteRemembered', { origin: state.targetOrigin });
       remembered = true;
+      lastSig = '';
       render();
     }
-  };
-  const cd = document.getElementById('copydiag');
-  if (cd) cd.onclick = () => void navigator.clipboard.writeText(diagText());
+  } else if (t.id === 'copydiag') void navigator.clipboard.writeText(diagText());
+});
+app.addEventListener('change', async (e) => {
+  const el = e.target as HTMLInputElement;
+  if (el.dataset.s) {
+    const k = el.dataset.s as keyof Settings;
+    settings = await saveSettings({ [k]: k === 'approvedOrigins' ? el.value.split(',').map((x) => x.trim()).filter(Boolean) : el.value } as Partial<Settings>);
+  } else if (el.dataset.sb) settings = await saveSettings({ [el.dataset.sb]: el.checked } as Partial<Settings>);
+});
+app.addEventListener('input', (e) => {
+  const el = e.target as HTMLInputElement;
+  if (el.id === 'markerLabel') markerLabel = el.value;
+});
+app.addEventListener('keydown', (e) => {
+  if ((e.target as HTMLElement).id === 'markerLabel' && e.key === 'Enter') (app.querySelector('[data-c="marker"]') as HTMLElement | null)?.click();
+});
+
+async function loadMeta(s: SessionRecord): Promise<void> {
+  if (meta.get(s.id)?.thumb && s.status !== 'active') return;
+  const shots = (await dbIndexAll<ScreenshotItem>('shots', 'sessionId', s.id)).sort((a, b) => a.ts - b.ts);
+  const evs = await eventsOfSession<TimelineEvent>(s.id);
+  const thumb: string | null = meta.get(s.id)?.thumb ?? (s.status === 'active' ? null : await sessionThumb(s.id));
+  meta.set(s.id, { thumb, markers: evs.filter((x) => x.type === 'marker').length, shots: shots.length });
 }
 
 async function refreshSessions(): Promise<void> {
   sessions = (await dbGetAll<SessionRecord>('sessions')).sort((a, b) => b.createdAt - a.createdAt);
-  render();
+  await Promise.all(sessions.slice(0, 5).map(loadMeta));
+  if (state.sessionId || state.shotSessionId) shotCount = (await dbIndexAll<ScreenshotItem>('shots', 'sessionId', state.sessionId ?? state.shotSessionId!)).length;
+  else shotCount = 0;
+  draw();
 }
 
 async function detectCodecs(): Promise<void> {
@@ -150,19 +264,27 @@ async function detectCodecs(): Promise<void> {
   codecInfo = out.join(' ');
 }
 
+/** Re-render only when something visible changed, so hover, focus and scroll are never disturbed by the 1 s poll. */
+function draw(): void {
+  const d = effectiveDisplay();
+  const sig = JSON.stringify([state, d.code, view, Math.floor((health?.ringSegments ?? 0)), notice?.at, sessions.map((s) => [s.id, s.status, s.endedAt]), [...meta.entries()].map(([k, v]) => [k, v.markers, v.shots, !!v.thumb]), shotCount, remembered, settings, view === 'settings' ? [health?.framesEncoded, swStarts] : 0, notice && Date.now() - notice.at < 9000]);
+  if (sig !== lastSig) {
+    lastSig = sig;
+    render();
+  }
+  const t = document.querySelector('.timer');
+  if (t && state.reproStartedAt && !state.terminal) t.textContent = formatClock(Date.now() - state.reproStartedAt);
+  const dg = document.getElementById('diag');
+  if (dg) dg.textContent = diagText();
+}
+
 async function poll(): Promise<void> {
   health = (await dbGet<HealthSnapshot>('journal', 'health')) ?? null;
   swStarts = ((await chrome.storage.session.get('swStarts')).swStarts as number) ?? 0;
   const est = await storageEstimate().catch(() => null);
   if (est) storageInfo = `${est.usageMB.toFixed(1)} MB used of ${est.quotaMB.toFixed(0)} MB quota, persisted=${est.persisted}`;
   if (state.targetOrigin) remembered = (await chrome.permissions.contains({ origins: [`${state.targetOrigin}/*`] }).catch(() => false)) || remembered;
-  if (!document.querySelector('details[open]') ) render();
-  else {
-    const el = document.getElementById('diag');
-    if (el) el.textContent = diagText();
-    const t = document.querySelector('.timer');
-    if (t && state.reproStartedAt) t.textContent = formatClock(Date.now() - state.reproStartedAt);
-  }
+  draw();
 }
 
 async function main(): Promise<void> {
@@ -178,9 +300,13 @@ async function main(): Promise<void> {
     void refreshSessions();
   });
   chrome.storage.onChanged.addListener((c, area) => {
-    if (area === 'local' && c.settings) settings = { ...settings, ...(c.settings.newValue as Settings) };
+    if (area === 'local' && c.settings) {
+      settings = { ...settings, ...(c.settings.newValue as Settings) };
+      draw();
+    }
   });
   setInterval(() => void poll(), 1000);
   setInterval(() => void refreshSessions(), 5000);
+  setInterval(() => draw(), 500);
 }
 void main();

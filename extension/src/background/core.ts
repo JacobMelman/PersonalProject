@@ -244,9 +244,12 @@ export async function injectContent(tabId: number): Promise<boolean> {
 
 // ---------------------------------------------------------------- arm / disarm
 async function startCapture(tab: chrome.tabs.Tab, settings: Settings): Promise<void> {
+  // The side panel opens at the same moment as the click and shrinks the viewport: let it settle, then capture at the real tab size.
+  await new Promise((r) => setTimeout(r, 450));
+  const live = await chrome.tabs.get(tab.id!).catch(() => tab);
   const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
   await ensureOffscreen();
-  const res = await sendOff<{ ok: boolean; error?: string }>({ kind: 'off', op: 'start', streamId, settings });
+  const res = await sendOff<{ ok: boolean; error?: string }>({ kind: 'off', op: 'start', streamId, settings, size: live.width && live.height ? { width: live.width, height: live.height } : undefined });
   if (res && res.ok === false) throw new Error(res.error ?? 'Recorder failed to start');
 }
 
