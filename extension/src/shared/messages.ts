@@ -50,6 +50,10 @@ export type OffscreenEvent =
 
 /** Content script -> service worker (over a long-lived port named PORT_NAME). */
 export const PORT_NAME = 'rd-content';
+/** Sub-frames (same-origin or approved-origin iframes) only send events; liveness is judged on the top frame. */
+export const FRAME_PORT_NAME = 'rd-frame';
 export type ContentMessage =
   | { t: 'hello'; origin: string; path: string; visible: boolean }
+  | { t: 'ping' }
+  | { t: 'bye' }
   | { t: 'event'; ev: Omit<TimelineEvent, 'sessionId' | 'ts' | 'tabId'> & { ts?: number } };

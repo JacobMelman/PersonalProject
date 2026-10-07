@@ -15,6 +15,7 @@ let sessions: SessionRecord[] = [];
 let codecInfo = '';
 let storageInfo = '';
 let remembered = false;
+let swStarts = 0;
 
 const GLYPH: Record<string, string> = {
   inactive: '○', armed: '◉', recording: '●', screenshot_only: '▣', privacy_paused: '⏸', manual_paused: '⏸', afk: '☾', target_ended: '■', error: '⚠',
@@ -77,7 +78,7 @@ function render(): void {
     <div class="row"><span>Marker auto-screenshot</span><input type="checkbox" data-sb="markerScreenshot" ${settings.markerScreenshot ? 'checked' : ''}></div>
     <div class="row"><span>Video capture (off = Screenshot-only, applies when arming)</span><input type="checkbox" data-sb="captureVideo" ${settings.captureVideo ? 'checked' : ''}></div>
     <div class="row"><span>Open Review after saving</span><input type="checkbox" data-sb="openReviewAfterSave" ${settings.openReviewAfterSave ? 'checked' : ''}></div>
-    <p class="muted small">Shortcuts: Alt+Shift+R save replay, Alt+Shift+M marker, Alt+Shift+S screenshot, Alt+Shift+P start/finish session (change at chrome://extensions/shortcuts).</p>
+    <p class="muted small">Shortcuts: Alt+Shift+R save replay, Alt+Shift+M marker, Alt+Shift+S screenshot. Chrome allows only 3 default keys per extension: assign \"start / finish session\" yourself at chrome://extensions/shortcuts.</p>
   </details>
   <details><summary>Diagnostics (Phase 0 measurements)</summary>
     <pre class="diag" id="diag">${esc(diagText())}</pre>
@@ -92,7 +93,7 @@ function diagText(): string {
     {
       state: displayState(state).label, mode: state.mode, privacy: state.privacy, manual: state.manual, afk: state.afk,
       health: h ? { ...h, ageMs: Date.now() - h.at, ringBytesMB: +(h.ringBytes / 1048576).toFixed(2), writtenMB: +(h.bytesWritten / 1048576).toFixed(2), fpsEncoded: undefined } : null,
-      storage: storageInfo, encoders: codecInfo, chromeUA: navigator.userAgent,
+      storage: storageInfo, encoders: codecInfo, serviceWorkerStarts: swStarts, chromeUA: navigator.userAgent,
     },
     null,
     2,
@@ -151,6 +152,7 @@ async function detectCodecs(): Promise<void> {
 
 async function poll(): Promise<void> {
   health = (await dbGet<HealthSnapshot>('journal', 'health')) ?? null;
+  swStarts = ((await chrome.storage.session.get('swStarts')).swStarts as number) ?? 0;
   const est = await storageEstimate().catch(() => null);
   if (est) storageInfo = `${est.usageMB.toFixed(1)} MB used of ${est.quotaMB.toFixed(0)} MB quota, persisted=${est.persisted}`;
   if (state.targetOrigin) remembered = (await chrome.permissions.contains({ origins: [`${state.targetOrigin}/*`] }).catch(() => false)) || remembered;

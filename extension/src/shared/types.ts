@@ -141,6 +141,8 @@ export interface TimelineEvent {
   evidenceId?: string;
   source?: string;
   confidence?: number;
+  /** Event came from an iframe rather than the top document. */
+  frame?: boolean;
 }
 
 export interface ScreenshotItem {

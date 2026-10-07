@@ -77,7 +77,7 @@ async function registerRememberedSite(origin: string): Promise<void> {
   const id = 'rd-' + origin.replace(/[^a-z0-9]/gi, '_');
   const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
   if (!existing.length) {
-    await chrome.scripting.registerContentScripts([{ id, matches: [`${origin}/*`], js: ['content.js'], runAt: 'document_start', persistAcrossSessions: true }]);
+    await chrome.scripting.registerContentScripts([{ id, matches: [`${origin}/*`], js: ['content.js'], runAt: 'document_start', allFrames: true, persistAcrossSessions: true }]);
   }
   const s = await getSettings();
   if (!s.approvedOrigins.includes(origin)) await chrome.storage.local.set({ settings: { ...s, approvedOrigins: [...s.approvedOrigins, origin] } });
@@ -109,6 +109,8 @@ void serial(async () => {
 });
 
 const BOOT = Date.now();
+// Diagnostics: how many times Chrome has (re)started this service worker in the current browser session.
+void chrome.storage.session.get('swStarts').then((r) => chrome.storage.session.set({ swStarts: ((r.swStarts as number) ?? 0) + 1, swLastStart: BOOT }));
 if (__E2E__) {
   // Test hook used by Playwright only (never present in the release build).
   (self as unknown as { __rd: unknown }).__rd = {

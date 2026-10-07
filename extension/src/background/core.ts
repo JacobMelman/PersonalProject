@@ -3,7 +3,7 @@
 import { collecting, collectingSemantics, displayState, initialState, reduce, type StateEvent } from '../shared/state';
 import { getSettings } from '../shared/settings';
 import { isApprovedOrigin, minimizeUrl } from '../shared/privacy';
-import { PORT_NAME, type ContentMessage, type OffscreenEvent, type OffscreenOp, type PinResult } from '../shared/messages';
+import { FRAME_PORT_NAME, PORT_NAME, type ContentMessage, type OffscreenEvent, type OffscreenOp, type PinResult } from '../shared/messages';
 import type { CaptureState, HealthSnapshot, ScreenshotItem, SessionKind, SessionRecord, Settings, TimelineEvent } from '../shared/types';
 import { dbAdd, dbDelete, dbDeleteWhereSession, dbGet, dbGetAll, dbIndexAll, dbPut, eventsOfSession, deleteEventsRange } from '../storage/db';
 import { opfsRemove, opfsWrite } from '../storage/opfs';
@@ -39,7 +39,10 @@ interface PortInfo {
   port: chrome.runtime.Port;
   origin: string | null;
   helloAt: number;
+  /** Last sign of life (hello / ping / event). A document frozen in bfcache stops pinging. */
+  seenAt: number;
 }
+const LIVENESS_MS = 3500;
 const ports = new Map<number, PortInfo>();
 
 export const browserName = (): string => {
@@ -219,7 +222,7 @@ export async function reevaluate(): Promise<void> {
   const origins = await approved(s);
   const url = minimizeUrl(tab.url);
   const urlOk = url ? isApprovedOrigin(url.origin, origins) : true; // url is hidden when we have no host access -> rely on the content script
-  const ready = !!info && isApprovedOrigin(info.origin, origins);
+  const ready = !!info && isApprovedOrigin(info.origin, origins) && Date.now() - info.seenAt < LIVENESS_MS;
   const ok = tab.active && ready && urlOk;
   if (!ok && !s.privacy) await dispatch({ type: 'PRIVACY_PAUSE' });
   if (ok && s.privacy) await dispatch({ type: 'PRIVACY_RESUME' });
@@ -227,10 +230,15 @@ export async function reevaluate(): Promise<void> {
 
 export async function injectContent(tabId: number): Promise<boolean> {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] });
     return true;
   } catch {
-    return false;
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }); // some frame refused: top document at least
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -253,7 +261,13 @@ export async function armFromTab(tab: chrome.tabs.Tab): Promise<void> {
   }
   const origins = state.targetOrigin ? [state.targetOrigin, ...settings.approvedOrigins] : [];
   if (state.mode !== 'inactive' && !state.terminal) {
-    if (state.targetTabId === tab.id) return;
+    if (state.targetTabId === tab.id) {
+      // Clicking the icon again on the target re-grants activeTab (lost on cross-origin navigation) and re-validates the page.
+      await injectContent(tab.id);
+      await reevaluate();
+      await notify('Target re-validated.', 'info');
+      return;
+    }
     // Active Video Target switch: allowed only inside the approved scope; it needs this fresh user invocation (activeTab).
     if (!isApprovedOrigin(url.origin, origins)) {
       await notify('This tab is outside the approved Target Profile. Disarm first to approve another target.', 'warn');
@@ -477,15 +491,29 @@ export async function addMarker(label?: string): Promise<void> {
 
 // ---------------------------------------------------------------- content ports
 export function onPort(port: chrome.runtime.Port): void {
-  if (port.name !== PORT_NAME) return;
   const tabId = port.sender?.tab?.id;
   if (tabId == null) return;
-  ports.set(tabId, { port, origin: null, helloAt: 0 });
+  if (port.name === FRAME_PORT_NAME) {
+    port.onMessage.addListener((msg: ContentMessage) => void serial(() => onFrameMessage(tabId, msg)));
+    return;
+  }
+  if (port.name !== PORT_NAME) return;
+  ports.set(tabId, { port, origin: null, helloAt: 0, seenAt: 0 });
   port.onMessage.addListener((msg: ContentMessage) => void serial(() => onContentMessage(tabId, port, msg)));
   port.onDisconnect.addListener(() => {
     if (ports.get(tabId)?.port === port) ports.delete(tabId);
     void serial(reevaluate);
   });
+}
+
+/** Events from iframes: same rules as the top document - approved origin only, and only while collecting. */
+async function onFrameMessage(tabId: number, msg: ContentMessage): Promise<void> {
+  if (msg.t !== 'event') return;
+  const s = await getState();
+  if (s.targetTabId !== tabId || !collectingSemantics(s)) return;
+  const origins = await approved(s);
+  if (!msg.ev.origin || !isApprovedOrigin(msg.ev.origin, origins)) return;
+  await recordEvent({ ...msg.ev, tabId, frame: true }, s);
 }
 
 async function onContentMessage(tabId: number, port: chrome.runtime.Port, msg: ContentMessage): Promise<void> {
@@ -496,10 +524,22 @@ async function onContentMessage(tabId: number, port: chrome.runtime.Port, msg: C
     if (info) {
       info.origin = msg.origin;
       info.helloAt = Date.now();
-    } else ports.set(tabId, { port, origin: msg.origin, helloAt: Date.now() });
+      info.seenAt = Date.now();
+    } else ports.set(tabId, { port, origin: msg.origin, helloAt: Date.now(), seenAt: Date.now() });
     await reevaluate();
     return;
   }
+  if (msg.t === 'ping') {
+    if (info) info.seenAt = Date.now();
+    if (s.privacy) await reevaluate(); // a live, approved page is back
+    return;
+  }
+  if (msg.t === 'bye') {
+    if (info) info.seenAt = 0; // the document is being left: pause right now, before anything else is shown
+    await reevaluate();
+    return;
+  }
+  if (info) info.seenAt = Date.now();
   if (msg.t === 'event') {
     if (!collectingSemantics(s)) return; // dropped while paused / AFK / ended
     const origins = await approved(s);
@@ -532,10 +572,15 @@ export async function onTabRemoved(tabId: number): Promise<void> {
 export async function onTabUpdated(tabId: number, info: chrome.tabs.OnUpdatedInfo): Promise<void> {
   const s = await getState();
   if (s.targetTabId !== tabId || s.mode === 'inactive' || s.terminal) return;
-  // A cross-document load disconnects the old page's port (-> Privacy Pause until the new page says hello), so nothing to do on
-  // 'loading'. Same-document (SPA) navigations also report 'loading' in Chrome and must not flicker the state.
-  if (info.status === 'complete' && !ports.has(tabId)) await injectContent(tabId);
+  // Same-document (SPA) navigations also report status changes, so this only re-evaluates (it does not pause by itself):
+  // a real document change shows up as a missing heartbeat / a visible URL that is not approved.
+  if (info.status === 'complete') await injectContent(tabId); // guarded in the page: injecting twice is harmless
+  await reevaluate();
+  // The frozen-page (bfcache) case produces no further events, so look again once the heartbeat is certainly stale.
+  if (recheckTimer) clearTimeout(recheckTimer);
+  recheckTimer = setTimeout(() => void serial(reevaluate), LIVENESS_MS + 200);
 }
+let recheckTimer: ReturnType<typeof setTimeout> | null = null;
 
 export async function onIdleState(state: 'active' | 'idle' | 'locked'): Promise<void> {
   const s = await getState();

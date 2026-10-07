@@ -1,6 +1,6 @@
 // Target-page semantic collector. Records mouse/focus/submit/navigation semantics only.
 // It never reads: key events, clipboard, input/textarea/select/contenteditable values or text of editable controls.
-import { PORT_NAME, type ContentMessage } from '../shared/messages';
+import { FRAME_PORT_NAME, PORT_NAME, type ContentMessage } from '../shared/messages';
 import { implicitRole, isEditableKind, minimizeUrl, sanitizeLabel, sanitizeStableId } from '../shared/privacy';
 import type { ElementDescriptor } from '../shared/types';
 
@@ -10,12 +10,12 @@ declare global {
   }
 }
 
-if (!window.__reprodeskContent && window.top === window) {
+if (!window.__reprodeskContent) {
   window.__reprodeskContent = true;
-  start();
+  start(window.top === window);
 }
 
-function start(): void {
+function start(isTop: boolean): void {
   let port: chrome.runtime.Port | null = null;
 
   const here = () => minimizeUrl(location.href);
@@ -27,13 +27,14 @@ function start(): void {
     }
   };
   const hello = () => {
+    if (!isTop) return;
     const u = here();
     if (u) send({ t: 'hello', origin: u.origin, path: u.path, visible: document.visibilityState === 'visible' });
   };
 
   function connect(): void {
     try {
-      port = chrome.runtime.connect({ name: PORT_NAME });
+      port = chrome.runtime.connect({ name: isTop ? PORT_NAME : FRAME_PORT_NAME });
       port.onDisconnect.addListener(() => {
         port = null;
         // The service worker may have been recycled while the page is still alive: reconnect.
@@ -64,6 +65,16 @@ function start(): void {
     return parts.join('>');
   }
 
+  /** Visible text is only used for controls and small leaf elements: the text of a big container is not a useful (or safe) name. */
+  const NAMED_ROLES = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'row', 'cell', 'gridcell', 'checkbox', 'radio', 'switch', 'treeitem', 'columnheader']);
+  function labelAllowed(el: Element): boolean {
+    const tag = el.tagName.toLowerCase();
+    if (['a', 'button', 'summary', 'label', 'option', 'th', 'td', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) return true;
+    const role = el.getAttribute('role');
+    if (role && NAMED_ROLES.has(role)) return true;
+    return el.children.length === 0;
+  }
+
   function describe(target: EventTarget | null): ElementDescriptor | null {
     let el = target instanceof Element ? target : null;
     if (!el) return null;
@@ -81,7 +92,7 @@ function start(): void {
         const id = el.getAttribute('id');
         const lab = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : el.closest('label');
         labelSource = lab?.textContent ?? el.getAttribute('placeholder');
-      } else {
+      } else if (labelAllowed(el)) {
         labelSource = (el as HTMLElement).innerText ?? el.textContent;
       }
     }
@@ -102,14 +113,14 @@ function start(): void {
 
   const emit = (ev: Extract<ContentMessage, { t: 'event' }>['ev']) => {
     if (document.visibilityState !== 'visible') return;
-    send({ t: 'event', ev: { ...ev, ts: Date.now() } });
+    send({ t: 'event', ev: { ...ev, ts: Date.now(), frame: !isTop || undefined } });
   };
   const loc = () => here() ?? { origin: location.origin, path: '/' };
 
   addEventListener(
     'click',
     (e) => {
-      const el = describe(e.target);
+      const el = describe(e.composedPath()[0] ?? e.target); // composedPath()[0] sees through open Shadow DOM
       if (!el) return;
       const u = loc();
       emit({
@@ -127,7 +138,7 @@ function start(): void {
   addEventListener(
     'focusin',
     (e) => {
-      const el = describe(e.target);
+      const el = describe(e.composedPath()[0] ?? e.target);
       if (!el) return;
       const u = loc();
       emit({ type: 'focus', origin: u.origin, path: u.path, element: el, source: 'chromium:dom', confidence: 0.9 });
@@ -156,12 +167,21 @@ function start(): void {
     if (!first) emit({ type: 'navigate', origin: u.origin, path: u.path, source: 'chromium:nav', confidence: 1 });
     hello();
   };
-  checkNav();
+  if (isTop) checkNav();
   addEventListener('popstate', checkNav);
   addEventListener('hashchange', checkNav);
   (window as unknown as { navigation?: EventTarget }).navigation?.addEventListener('navigatesuccess', checkNav);
-  setInterval(checkNav, 750);
+  if (isTop) setInterval(checkNav, 750);
   document.addEventListener('visibilitychange', hello);
+  // Liveness: a page frozen in the back/forward cache keeps its port open but stops pinging, which tells the service worker that the
+  // document it was capturing is gone (fail closed). 'bye' makes the pause immediate when the page is left.
+  if (isTop) {
+    setInterval(() => {
+      if (document.visibilityState === 'visible') send({ t: 'ping' });
+    }, 1000);
+    addEventListener('pagehide', () => send({ t: 'bye' }));
+    addEventListener('pageshow', hello);
+  }
 
   connect();
 }
