@@ -17,10 +17,11 @@
     "soak:repro": "node build.mjs && node tests/real/soak.mjs repro 31",
     "demo:site": "node scripts/demo-site.mjs",
     "demo:app": "node scripts/make-demo-app.mjs",
-    "demo:shoot": "node build.mjs && node scripts/shoot.mjs --video",
+    "demo:shoot": "node build.mjs && node scripts/shoot.mjs",
     "notices": "node scripts/gen-notices.mjs && rm -rf .notices-tmp",
     "demo:bundle": "node build.mjs && node scripts/make-sample-bundle.mjs",
-    "policy": "node scripts/gen-policy.mjs"
+    "policy": "node scripts/gen-policy.mjs",
+    "demo:film": "node build.mjs && node scripts/film.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.4",

@@ -1,5 +1,5 @@
 // Presentation rig: real headed Chromium under Xvfb, genuine toolbar click, scripted use of the Northwind Gear demo shop (two deliberate bugs).
-// Produces the screenshots in docs/demo/ and, with --video, a screen recording of the whole run.
+// Produces the screenshots in docs/demo/. (The walkthrough videos come from scripts/film.mjs; --video here only makes a rough, uncaptioned screen capture.)
 //   node scripts/shoot.mjs [--video] [--only=panel|review]
 import { startDisplay, launchChrome, tmpProfile, rmProfile, sleep, xdo, findPage, realClick, clickToolbarIcon, shot, keyInfo, browserCdp, exportZip, DISPLAY } from '../tests/real/lib.mjs';
 import { makeProbe } from '../tests/real/probe.mjs';

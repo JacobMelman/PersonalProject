@@ -243,4 +243,4 @@ extension/tests/...             тесты (unit + e2e)
 Place order всегда падает с E-4021) и готовый сценарий показа на 5-7 минут: extension/docs/DEMO_SCRIPT.md.
     cd extension && npm install && npm run demo:site      -> http://localhost:5173/
 Готовые материалы для слайдов: extension/docs/demo/*.png (все состояния панели, Review, HTML-отчёт)
-и extension/docs/demo/demo-run.mp4 (запись прогона). Описание дизайна: extension/docs/DESIGN.md.
+и два видео-ролика extension/docs/demo/reprodesk-demo.mp4 (без субтитров) и reprodesk-demo-subtitles.mp4 (с английскими субтитрами). Описание дизайна: extension/docs/DESIGN.md.

@@ -1,0 +1,109 @@
+1
+00:00:01,048 --> 00:00:06,319
+ReproDesk: capture a bug once, give developers the evidence.
+
+2
+00:00:06,399 --> 00:00:11,872
+Demo app: Northwind Gear, a web shop with two deliberate bugs.
+
+3
+00:00:12,715 --> 00:00:20,635
+One click on the toolbar icon arms ReproDesk for this tab only. Chrome
+requires that explicit action, so nothing records silently.
+
+4
+00:00:20,715 --> 00:00:28,635
+Armed: a rolling buffer keeps only the last 90 seconds, locally. No keystrokes
+are collected and only this tab is recorded.
+
+5
+00:00:28,715 --> 00:00:41,661
+Test as usual: ReproDesk quietly keeps the latest moments in its buffer.
+
+6
+00:00:41,741 --> 00:00:49,663
+Something looked wrong? Save last replay (Alt+Shift+R) keeps what just
+happened, so there is no need to reproduce it.
+
+7
+00:00:49,743 --> 00:00:57,661
+For a known bug, start a Repro Session: the whole path is recorded, plus 30
+seconds of context from before the start.
+
+8
+00:00:57,741 --> 00:01:04,200
+Bug 1: the promo code SUMMER20 shows a discount, but the total does not
+change.
+
+9
+00:01:04,280 --> 00:01:10,322
+Add a marker to flag the moment. A screenshot is taken automatically.
+
+10
+00:01:10,402 --> 00:01:25,173
+Fill in the checkout form. Typed text is never stored as events; the pixels
+can be hidden later, before sharing.
+
+11
+00:01:25,253 --> 00:01:34,363
+Bug 2: Place order fails with error E-4021.
+
+12
+00:01:34,443 --> 00:01:41,651
+Look at another tab and recording pauses by itself. Nothing from other tabs is
+ever stored.
+
+13
+00:01:41,731 --> 00:01:45,883
+Back on the approved tab, capture resumes.
+
+14
+00:01:45,963 --> 00:01:52,000
+Finish & review stops the recording and opens the report.
+
+15
+00:01:52,080 --> 00:01:59,475
+Review: the video, a live timeline and steps drafted from what really
+happened. No AI guesses.
+
+16
+00:01:59,555 --> 00:02:05,283
+Click any row of the timeline to jump to that moment in the video.
+
+17
+00:02:06,159 --> 00:02:19,232
+Hide sensitive data before sharing: open a screenshot, blur the card number
+and box the error.
+
+18
+00:02:19,312 --> 00:02:26,101
+The original screenshot is never modified. Only the exported copy carries the
+blur.
+
+19
+00:02:26,979 --> 00:02:50,914
+Do the same for video: mask the card field. The preview shows exactly what
+will be exported.
+
+20
+00:02:51,792 --> 00:02:59,085
+Describe what happened and what you expected. The expected result is always
+written by you.
+
+21
+00:03:00,084 --> 00:03:08,610
+One click exports an Evidence Package, an HTML report and a Word report.
+
+22
+00:03:08,690 --> 00:03:17,199
+The HTML report is self-contained, with the blurred screenshots, so developers
+can open it anywhere.
+
+23
+00:03:17,279 --> 00:03:25,202
+Everything stays on this device until you export it. Administrators can lock
+settings and restrict sites with standard browser policies.
+
+24
+00:03:25,282 --> 00:03:28,782
+ReproDesk: evidence instead of retelling.
