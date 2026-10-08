@@ -29,8 +29,13 @@ export function startDisplay(size = '1600x1000x24') {
   if (!existsSync(`/tmp/.X11-unix/X${DISPLAY.slice(1)}`)) {
     procs.push(spawn('Xvfb', [DISPLAY, '-screen', '0', size, '-ac', '+extension', 'MIT-SCREEN-SAVER'], { stdio: 'ignore' }));
   }
-  return sleep(1200).then(() => {
+  return sleep(1200).then(async () => {
     procs.push(spawn('openbox', [], { env: { ...process.env, DISPLAY }, stdio: 'ignore' }));
+    // Chromium decides at startup whether to draw its own frame: if no EWMH window manager has announced itself yet it falls back to
+    // the system title bar and the whole toolbar moves down. On a busy CI runner Chromium regularly won that race, so wait for openbox.
+    for (let i = 0; i < 50; i++) {
+      try { execFileSync('xdotool', ['get_num_desktops'], { env: { ...process.env, DISPLAY }, stdio: 'ignore' }); break; } catch { await sleep(100); }
+    }
     return { stop: () => procs.forEach((p) => p.kill()) };
   });
 }
@@ -41,7 +46,7 @@ export const shot = (file) => execFileSync('import', ['-window', 'root', file], 
 export async function launchChrome({ userData, port = 9333, startUrl = 'about:blank', extraArgs = [], width = 1400, height = 900, loadExtension = true, webgl = false }) {
   mkdirSync(path.join(userData, 'Default'), { recursive: true });
   const prefs = path.join(userData, 'Default', 'Preferences');
-  if (!existsSync(prefs)) writeFileSync(prefs, JSON.stringify({ extensions: { pinned_extensions: [keyInfo.id] }, browser: { has_seen_welcome_page: true }, credentials_enable_service: false, profile: { password_manager_enabled: false }, autofill: { credit_card_enabled: false, profile_enabled: false } }));
+  if (!existsSync(prefs)) writeFileSync(prefs, JSON.stringify({ extensions: { pinned_extensions: [keyInfo.id] }, browser: { has_seen_welcome_page: true, custom_chrome_frame: true }, credentials_enable_service: false, profile: { password_manager_enabled: false }, autofill: { credit_card_enabled: false, profile_enabled: false } }));
   const args = [
     `--user-data-dir=${userData}`, `--remote-debugging-port=${port}`, '--no-first-run', '--no-default-browser-check', '--no-sandbox',
     `--window-position=0,0`, `--window-size=${width},${height}`, '--disable-features=Translate,MediaRouter', '--password-store=basic',
@@ -115,32 +120,76 @@ export async function realClick(page, selector) {
   await sleep(250);
 }
 
-/** Finds the pinned ReproDesk icon by its indigo brand tile in the toolbar band (the toolbar layout shifts: side panel, download button, ...). */
+/** Finds the pinned ReproDesk icon by its indigo brand tile in the toolbar band (the toolbar layout shifts: side panel, download button, ...).
+ *  Returns the centre of the tile, or null. */
 export function locateToolbarIcon() {
   const f = path.join(tmpdir(), `rd-toolbar-${process.pid}.png`);
   shot(f);
-  const out = execFileSync('python3', ['-c', `
+  const out = JSON.parse(execFileSync('python3', ['-c', `
+import json
 from PIL import Image
-im = Image.open(${JSON.stringify(f)}).convert('RGB'); px = im.load(); xs = []
-for y in range(48, 80):
+im = Image.open(${JSON.stringify(f)}).convert('RGB'); px = im.load(); pts = []
+for y in range(40, 112):
     for x in range(700, im.size[0]):
         r,g,b = px[x,y]
-        if 30<=r<=115 and 50<=g<=140 and 190<=b<=255 and b-g>=60: xs.append(x)  # the indigo brand tile
-xs.sort(); cl = []
-for x in xs:
-    if cl and x - cl[-1][-1] <= 6: cl[-1].append(x)
-    else: cl.append([x])
-cl = [c for c in cl if len(c) >= 40]
-print(round(sum(cl[0]) / len(cl[0])) if cl else -1)`]).toString().trim();
-  return Number(out);
+        if 30<=r<=115 and 50<=g<=140 and 190<=b<=255 and b-g>=60: pts.append((x, y))  # the indigo brand tile
+# 2-D clusters (pixels within 3 px belong together): the toolbar icon, the side panel's own logo below it, ...
+parent = list(range(len(pts)))
+def find(i):
+    while parent[i] != i: parent[i] = parent[parent[i]]; i = parent[i]
+    return i
+idx = {p: i for i, p in enumerate(pts)}
+for i, (x, y) in enumerate(pts):
+    for dx in range(-3, 4):
+        for dy in range(-3, 4):
+            j = idx.get((x + dx, y + dy))
+            if j is not None: parent[find(i)] = find(j)
+groups = {}
+for i, p in enumerate(pts): groups.setdefault(find(i), []).append(p)
+def box(c): xs = [p[0] for p in c]; ys = [p[1] for p in c]; return [min(xs), max(xs), min(ys), max(ys), len(c)]
+cl = sorted(groups.values(), key=lambda c: (box(c)[2], box(c)[0]))
+icons = [c for c in cl if len(c) >= 40 and box(c)[1] - box(c)[0] <= 30 and box(c)[3] - box(c)[2] <= 26]
+hit = icons[0] if icons else None  # the toolbar sits above everything else in this band
+print(json.dumps({'x': round(sum(p[0] for p in hit) / len(hit)) if hit else -1, 'y': round(sum(p[1] for p in hit) / len(hit)) if hit else -1, 'clusters': [box(c) for c in cl][:8]}))`]).toString());
+  if (process.env.RD_DEBUG_TOOLBAR || out.x < 0) console.log(`INFO  toolbar icon search: x=${out.x} y=${out.y} clusters=${JSON.stringify(out.clusters)}`);
+  return out.x < 0 ? null : { x: out.x, y: out.y };
 }
 export const clickToolbarIcon = async () => {
-  const x = locateToolbarIcon();
-  if (x < 0) throw new Error('ReproDesk toolbar icon not found on screen');
-  xdo('mousemove', String(x), '63');
+  let at = null;
+  for (let i = 0; i < 10 && !at; i++) { at = locateToolbarIcon(); if (!at) await sleep(500); } // a slow machine paints the pinned icon late
+  if (!at) { screenMap('toolbar icon not found'); throw new Error('ReproDesk toolbar icon not found on screen'); }
+  xdo('mousemove', String(at.x), String(at.y));
   await sleep(150);
   xdo('click', '1');
 };
+
+/** Prints the screen as text (a CI log is often the only thing that leaves the runner): visible windows with geometry, then a coarse
+ *  colour map of the whole screen and a fine one of the toolbar band. Legend: # brand indigo, b other blue, k dark, - grey, . light, o other. */
+export function screenMap(label) {
+  const f = path.join(tmpdir(), `rd-map-${process.pid}.png`);
+  shot(f);
+  let wins = '';
+  try {
+    const ids = xdo('search', '--onlyvisible', '--name', '.').split('\n').filter(Boolean).slice(0, 12);
+    wins = ids.map((id) => { try { return `${id} "${xdo('getwindowname', id)}" ${xdo('getwindowgeometry', id).split('\n').slice(1).map((l) => l.trim()).join(' ')}`; } catch { return id; } }).join('\n');
+  } catch { wins = '(xdotool search failed)'; }
+  const map = execFileSync('python3', ['-c', `
+from PIL import Image
+im = Image.open(${JSON.stringify(f)}).convert('RGB'); W, H = im.size; px = im.load()
+def c(x, y):
+    r,g,b = px[x,y]; l = (r+g+b)/3
+    if 30<=r<=115 and 50<=g<=140 and 190<=b<=255 and b-g>=60: return '#'
+    if b > r+40 and b > g+20: return 'b'
+    if l < 60: return 'k'
+    if l > 200 and max(r,g,b)-min(r,g,b) < 30: return '.'
+    if max(r,g,b)-min(r,g,b) < 30: return '-'
+    return 'o'
+print('screen %dx%d, 20px blocks:' % (W, H))
+for y in range(0, H, 20): print(''.join(c(x, y+10 if y+10 < H else y) for x in range(0, W, 20)))
+print('toolbar band x=600..%d step 5, y=30..110 step 4:' % W)
+for y in range(30, 110, 4): print('%3d ' % y + ''.join(c(x, y) for x in range(600, W, 5)))`]).toString();
+  console.log(`---- screen map: ${label}\nwindows:\n${wins}\n${map}---- end screen map`);
+}
 
 /** Exports the Evidence Package ZIP of a session through the real Review page and returns the saved file path. */
 export async function exportZip(port, sessionId, dir, fmt = 'zip') {

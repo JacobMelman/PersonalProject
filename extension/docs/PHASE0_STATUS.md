@@ -2,7 +2,7 @@
 
 This is the **Phase 0 engineering-spike build**, not a product release. The table maps every Phase 0 spike of the spec (section 20.1) to what exists in this
 repository, what is covered by automated tests, and what still has to be validated by a person on a real machine. Checks come from four layers:
-Vitest (`npm test`, 91 tests), headless Playwright e2e (`npm run test:e2e`, 172 checks incl. screenshot editor, video redaction, sample sessions, an axe accessibility audit and administrator policies), and the **real-browser suites** (`npm run test:real`, 87 checks; `npm run soak:*`; `tests/real/memslope.mjs`): headed Chromium under Xvfb driven
+Vitest (`npm test`, 91 tests), headless Playwright e2e (`npm run test:e2e`, 178 checks incl. screenshot editor, video redaction, sample sessions, an axe accessibility audit and administrator policies), and the **real-browser suites** (`npm run test:real`, 87 checks; `npm run soak:*`; `tests/real/memslope.mjs`): headed Chromium under Xvfb driven
 by genuine X11 input (xdotool), a raw CDP client attached to page targets only (so Chrome can really recycle the service worker), real toolbar clicks, real keyboard
 shortcuts, real `chrome.idle`, the real permission prompt, and an OS window drawn over the browser. The one thing none of them can be is **official Google Chrome on
 your machine and your application** - that is what the right-hand column is for. Raw results (screenshots, CSVs, JSON): `docs/phase0-results/`.

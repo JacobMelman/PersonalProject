@@ -55,7 +55,8 @@ jobs:
           cache-dependency-path: extension/package-lock.json
       - run: npm ci
       - name: System tools used by the pixel / media checks
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
+        timeout-minutes: 20
+        run: bash scripts/ci-apt.sh ffmpeg imagemagick
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
@@ -79,7 +80,8 @@ jobs:
           cache-dependency-path: extension/package-lock.json
       - run: npm ci
       - name: System tools (virtual display, window manager, input, media)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb openbox xdotool imagemagick ffmpeg x11-utils python3-pil
+        timeout-minutes: 20
+        run: bash scripts/ci-apt.sh xvfb openbox xdotool imagemagick ffmpeg x11-utils python3-pil
       - run: npx playwright install --with-deps chromium
       - name: Managed-policy directory (the policy suite writes a real Chromium policy file here)
         run: sudo mkdir -p /etc/chromium/policies/managed && sudo chmod -R a+rwX /etc/chromium/policies
@@ -87,3 +89,9 @@ jobs:
         run: |
           export CHROME_BIN="$(node -e "console.log(require('playwright').chromium.executablePath())")"
           npm run test:real
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: real-browser-screens
+          path: extension/real-results/
+          if-no-files-found: ignore

@@ -187,11 +187,11 @@ try {
   await scene('app', null, 0.5);
 
   // ---- 2. arm
-  const iconX = locateToolbarIcon();
-  if (iconX < 0) throw new Error('toolbar icon not found');
+  const icon = locateToolbarIcon();
+  if (!icon) throw new Error('toolbar icon not found');
   let panel, panelOff;
   await scene('arm', async () => {
-    await click(iconX, 63, 1100);
+    await click(icon.x, icon.y, 1100);
     await probe.until(async () => (await probe.state())?.mode === 'armed', 12000);
     panel = await findPage(PORT, 'chrome-extension://' + keyInfo.id + '/sidepanel.html');
     await ripple(panel);

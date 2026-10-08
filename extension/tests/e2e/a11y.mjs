@@ -1,6 +1,6 @@
 // Accessibility: axe-core on every extension surface (side panel, Review list + detail, editor, privacy tools) in light and dark themes.
 // Serious / critical violations fail the run; moderate / minor ones are printed so they stay visible.
-import { launch, keyInfo, newReporter, rmProfile, sleep, tmpProfile } from './lib.mjs';
+import { launch, keyInfo, newReporter, rmProfile, setScheme, sleep, tmpProfile } from './lib.mjs';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
@@ -13,8 +13,7 @@ const { ctx, dump, until } = await launch(userData, { viewport: { width: 1300, h
 
 async function audit(page, name) {
   for (const scheme of ['light', 'dark']) {
-    await page.emulateMedia({ colorScheme: scheme });
-    await sleep(250);
+    await setScheme(page, scheme);
     await page.evaluate(axeSource);
     const res = await page.evaluate(() => axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'] } }));
     const bad = res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');

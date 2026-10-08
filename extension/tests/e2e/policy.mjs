@@ -1,6 +1,6 @@
 // Enterprise policy enforcement (headless build: the policy is injected through the E2E-only `__policy` key; the real managed-storage
 // channel is covered by tests/real/real-policy.mjs). Proves each administrator control actually changes behaviour, fails closed, and is visible to the user.
-import { launch, keyInfo, newReporter, rmProfile, sleep, startSite, tmpProfile } from './lib.mjs';
+import { launch, keyInfo, newReporter, rmProfile, setScheme, sleep, startSite, tmpProfile } from './lib.mjs';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
@@ -85,13 +85,13 @@ try {
   ok('diagnostics report that a policy is active', diag.policy?.managed === true && diag.policy.locked.includes('replaySec'));
   // accessibility of the managed UI in both themes
   for (const scheme of ['light', 'dark']) {
-    await sp.emulateMedia({ colorScheme: scheme });
+    await setScheme(sp, scheme);
     await sp.evaluate(axeSource);
     const res = await sp.evaluate(() => axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'] } }));
     const bad = res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
     ok(`managed settings view [${scheme}]: no serious or critical accessibility violations`, bad.length === 0, bad.map((v) => `${v.id} x${v.nodes.length}: ${v.nodes.slice(0, 2).map((x) => x.target.join(' ')).join(' | ')}`).join('; '));
   }
-  await sp.emulateMedia({ colorScheme: 'light' });
+  await setScheme(sp, 'light');
 
   // ---------------------------------------------------------------- export controls + retention need real sessions: load the sample
   await setPolicy(null);

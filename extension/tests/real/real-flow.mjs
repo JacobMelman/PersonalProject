@@ -1,6 +1,6 @@
 // Real-browser validation: genuine toolbar click (activeTab), genuine keyboard shortcuts, genuine mouse/keyboard input.
 // Run:  xvfb is started by the script itself.   node tests/real/real-flow.mjs
-import { keyInfo, startDisplay, launchChrome, newReporter, tmpProfile, rmProfile, sleep, xdo, findPage, realClick, clickToolbarIcon, shot, root } from './lib.mjs';
+import { keyInfo, startDisplay, launchChrome, newReporter, tmpProfile, rmProfile, sleep, xdo, findPage, realClick, clickToolbarIcon, screenMap, shot, root } from './lib.mjs';
 import { startSites } from './site.mjs';
 import { makeProbe } from './probe.mjs';
 import path from 'node:path';
@@ -26,6 +26,7 @@ try {
   await clickToolbarIcon();
   const armed = await probe.until(async () => { const s = await probe.state(); return s?.mode === 'armed' ? s : null; }, 10000);
   ok('REAL toolbar click arms ReproDesk (activeTab + tabCapture, no allow-list flag)', !!armed);
+  if (!armed || process.env.RD_SCREEN_MAP) screenMap('after the toolbar click');
   ok('badge shows ON', (await probe.badge()) === 'ON');
   ok('side panel opened by the click', (await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()).some((t) => t.url.endsWith('/sidepanel.html')));
   const h = await probe.until(async () => { const x = await probe.health(); return x && x.segmentsWritten > 0 ? x : null; }, 15000);

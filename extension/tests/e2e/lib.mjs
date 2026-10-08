@@ -22,6 +22,13 @@ export async function startSite(port) {
   return server;
 }
 
+/** Switches the colour scheme and waits until it has settled: transitions are turned off (prefers-reduced-motion) so an audit never
+ *  samples a background halfway through its theme transition (a slow CI runner did exactly that). */
+export async function setScheme(page, colorScheme) {
+  await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+}
+
 export function newReporter() {
   const results = [];
   let failed = 0;
