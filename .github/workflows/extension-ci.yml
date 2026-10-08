@@ -81,7 +81,7 @@ jobs:
       - run: npm ci
       - name: System tools (virtual display, window manager, input, media)
         timeout-minutes: 20
-        run: bash scripts/ci-apt.sh xvfb openbox xdotool imagemagick ffmpeg x11-utils python3-pil
+        run: bash scripts/ci-apt.sh xvfb openbox xdotool xterm imagemagick ffmpeg x11-utils python3-pil
       - run: npx playwright install --with-deps chromium
       - name: Managed-policy directory (the policy suite writes a real Chromium policy file here)
         run: sudo mkdir -p /etc/chromium/policies/managed && sudo chmod -R a+rwX /etc/chromium/policies
