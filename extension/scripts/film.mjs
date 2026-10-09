@@ -30,6 +30,7 @@ mkdirSync(dl, { recursive: true });
 let cur = { x: 760, y: 520 };
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 async function glide(x, y, ms = 700) {
+  ms *= PACE;
   const steps = Math.max(10, Math.round(ms / 20));
   const from = { ...cur };
   for (let i = 1; i <= steps; i++) {
@@ -43,7 +44,7 @@ const press = () => xdo('mousedown', '1');
 const release = () => xdo('mouseup', '1');
 async function click(x, y, ms) { await glide(x, y, ms); await sleep(160); xdo('click', '1'); await sleep(260); }
 async function drag(a, b, ms = 800) { await glide(a.x, a.y, 600); await sleep(150); press(); await sleep(120); await glide(b.x, b.y, ms); await sleep(150); release(); await sleep(300); }
-const typeText = async (text, delay = 80) => { xdo('type', '--delay', String(delay), text); await sleep(250); };
+const typeText = async (text, delay = 80) => { xdo('type', '--delay', String(Math.max(35, Math.round(delay * PACE))), text); await sleep(200); };
 const selectAll = () => xdo('key', 'ctrl+a');
 
 const RIPPLE = `(() => { if (window.__rip) return; window.__rip = 1;
@@ -83,10 +84,11 @@ const pointAt = (off, r, fx, fy) => ({ x: Math.round(off.dx + r.x + r.w * fx), y
 // ------------------------------------------------------------------ captions
 let recStartWall = 0;
 const vt = () => (Date.now() - recStartWall) / 1000;
-const beat = (ms) => sleep(ms);
+const PACE = Number(process.env.FILM_PACE ?? 0.78); // < 1 = brisker pauses, cursor moves and typing
+const beat = (ms) => sleep(ms * PACE);
 const timeline = {};
 /** One narrated scene: the voice starts with the scene, the scene lasts at least as long as its narration (+ a breath). */
-async function scene(id, fn, extra = 0.6) {
+async function scene(id, fn, extra = 0.35) {
   if (!VOICE[id]) throw new Error('no narration for scene ' + id);
   timeline[id] = vt();
   const t0 = Date.now();
@@ -99,13 +101,13 @@ async function scene(id, fn, extra = 0.6) {
 // ------------------------------------------------------------------ narration (spoken text -> caption text)
 const C = (say, show = say) => ({ say, show });
 const NARRATION = {
-  intro: [C('This is Repro Desk.', 'This is ReproDesk.'), C('It captures a bug once, and gives developers the evidence.')],
+  intro: [C('This is [[ ɹˈɛpɹoʊdˌɛsk. ]]', 'This is ReproDesk.'), C('It captures a bug once, and gives developers the evidence.')],
   app: [C('Our demo app is Northwind Gear:'), C('a web shop with two deliberate bugs.')],
-  arm: [C('One click on the toolbar icon arms Repro Desk for this tab only.', 'One click on the toolbar icon arms ReproDesk for this tab only.'), C('Chrome requires that explicit click, so nothing ever records silently.')],
+  arm: [C('One click on the toolbar icon arms [[ ɹˈɛpɹoʊdˌɛsk ]] for this tab only.', 'One click on the toolbar icon arms ReproDesk for this tab only.'), C('Chrome requires that explicit click, so nothing ever records silently.')],
   armed: [C('Now it is armed.'), C('A rolling buffer keeps only the last ninety seconds, on this computer.', 'A rolling buffer keeps only the last 90 seconds, on this computer.'), C('No keystrokes are collected, and only this tab is recorded.')],
-  test: [C('Test as usual.'), C('Repro Desk quietly keeps the latest moments in its buffer.', 'ReproDesk quietly keeps the latest moments in its buffer.')],
+  test: [C('Test as usual.'), C('[[ ɹˈɛpɹoʊdˌɛsk ]] quietly keeps the latest moments in its buffer.', 'ReproDesk quietly keeps the latest moments in its buffer.')],
   replay: [C('Something looked wrong?'), C('Save last replay keeps what just happened.'), C('The shortcut is Alt, Shift, R. There is no need to reproduce it.', 'Shortcut: Alt+Shift+R. No need to reproduce it.')],
-  repro: [C('For a known bug, start a Repro Session.'), C('It records the whole path, plus thirty seconds of context from before the start.', 'It records the whole path, plus 30 seconds of context from before the start.')],
+  repro: [C('For a known bug, start a [[ ɹˈɛpɹoʊ ]] Session.', 'For a known bug, start a Repro Session.'), C('It records the whole path, plus thirty seconds of context from before the start.', 'It records the whole path, plus 30 seconds of context from before the start.')],
   bug1: [C('Bug one: the promo code summer twenty shows a discount,', 'Bug 1: the promo code SUMMER20 shows a discount,'), C('but the total does not change.')],
   marker: [C('Add a marker to flag this moment.'), C('A screenshot is taken automatically.')],
   checkout: [C('Now the checkout form.'), C('Typed text is never stored as events.'), C('The video does show pixels, though,'), C('so we will hide sensitive values before sharing.')],
@@ -126,7 +128,7 @@ const NARRATION = {
   export: [C('One click exports an evidence package, an H T M L report, and a Word document.', 'One click exports an Evidence Package, an HTML report and a Word document.')],
   html: [C('The H T M L report is self contained, with the blurred screenshots,', 'The HTML report is self-contained, with the blurred screenshots,'), C('so developers can open it anywhere.')],
   closing: [C('Everything stays on this device until you export it.'), C('Administrators can lock settings and restrict sites with standard browser policies.')],
-  final: [C('Repro Desk: evidence instead of retelling.', 'ReproDesk: evidence instead of retelling.')],
+  final: [C('[[ ɹˈɛpɹoʊdˌɛsk, ]] evidence instead of retelling.', 'ReproDesk: evidence instead of retelling.')],
 };
 
 function ensureVoice() {
@@ -153,7 +155,7 @@ function ensureVoice() {
 
 const voice = ensureVoice();
 const voiceDir = path.join(work, 'voice');
-writeFileSync(path.join(work, 'narration.json'), JSON.stringify({ model: voice.model, config: voice.config, length_scale: 1.06, scenes: Object.entries(NARRATION).map(([id, chunks]) => ({ id, chunks })) }));
+writeFileSync(path.join(work, 'narration.json'), JSON.stringify({ model: voice.model, config: voice.config, length_scale: 0.97, scenes: Object.entries(NARRATION).map(([id, chunks]) => ({ id, chunks })) }));
 execFileSync(voice.py, [path.join(here, 'narrate.py'), 'synth', path.join(work, 'narration.json'), voiceDir], { stdio: 'inherit' });
 const VOICE = Object.fromEntries(JSON.parse(readFileSync(path.join(voiceDir, 'manifest.json'), 'utf8')).scenes.map((x) => [x.id, x]));
 console.log('narration ready:', Object.values(VOICE).reduce((a, x) => a + x.duration, 0).toFixed(1), 's of speech in', Object.keys(VOICE).length, 'scenes');
@@ -347,7 +349,6 @@ try {
     await drag(pointAt(tabOff, vc, box[0] - pad / 2, box[1] - pad), pointAt(tabOff, vc, box[2] + pad / 2, box[3] + pad), 900);
     await beat(500);
   }
-  const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
   await smoothTo(rv, '#ptools', 'end');
   await scene('videoFind', async () => {
     await seekTo(tt.place - 0.4); // card, expiry and CVV are typed, the error has not appeared yet
@@ -363,7 +364,7 @@ try {
   await scene('videoMask2', async () => {
     await maskOver(boxes.card);
     await seekTo(tt.place + 0.2); await clickEl(rv, tabOff, '#pt-from-now', { ms: 600 });
-    await clickEl(rv, tabOff, '#pt-to'); selectAll(); await typeText(clock(Math.ceil(tt.dur)), 110); // "until the end": rounded up, never short
+    const to = await rectOf(rv, '#pt-to'); await glide(Math.round(tabOff.dx + to.x + to.w / 2), Math.round(tabOff.dy + to.y + to.h / 2), 600); // To already says "end of recording"
     await beat(500);
     await clickEl(rv, tabOff, '#pt-add', { ms: 700 }); await beat(700);
   });
@@ -448,8 +449,8 @@ const lines = (text, n = 44) => {
   return best < 0 ? [text] : [text.slice(0, best), text.slice(best + 1)];
 };
 writeFileSync(path.join(out, 'reprodesk-demo.en.srt'), caps.map((c, i) => `${i + 1}\n${ts(c.s, true)} --> ${ts(c.e, true)}\n${lines(c.text).join('\n')}\n`).join('\n'));
-// YouTube look: white text, each line on its own 75 % black box, bottom centre, over the picture
-const ass = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: YT,Inter,33,&H00FFFFFF,&H00FFFFFF,&H40000000,&H40000000,0,0,0,0,100,100,0,0,3,8,0,2,40,40,46,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${caps.map((c) => `Dialogue: 0,${ts(c.s, false)},${ts(c.e, false)},YT,,0,0,0,,${lines(c.text).join('\\N')}`).join('\n')}\n`;
+// Caption look: white text with a dark outline and a soft shadow, no background box, bottom centre, over the picture
+const ass = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: YT,Inter,34,&H00FFFFFF,&H00FFFFFF,&H00141414,&H8C000000,0,0,0,0,100,100,0,0,1,2.6,1.4,2,40,40,46,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${caps.map((c) => `Dialogue: 0,${ts(c.s, false)},${ts(c.e, false)},YT,,0,0,0,,${lines(c.text).join('\\N')}`).join('\n')}\n`;
 const assFile = path.join(work, 'captions.ass');
 writeFileSync(assFile, ass);
 

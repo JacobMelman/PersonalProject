@@ -228,10 +228,12 @@ async function detail(id: string): Promise<void> {
       (document.getElementById('pt-preview') as HTMLButtonElement).disabled = !hasEdits(edits);
     };
     const refresh = () => { paintList(); paintOverlay(); };
-    const timeInputs = (from: number, to: number) => `<label>From <input class="input sm" id="pt-from" value="${formatClock(from)}" size="6"></label><button class="btn ghost sm" id="pt-from-now">now</button><label>To <input class="input sm" id="pt-to" value="${formatClock(to)}" size="6"></label><button class="btn ghost sm" id="pt-to-now">now</button>`;
+    // From rounds down and To rounds up (the fields hold whole seconds): an edge off by a fraction always hides more, never less.
+    const clockUp = (ms: number) => formatClock(Math.ceil(ms / 1000) * 1000);
+    const timeInputs = (from: number, to: number) => `<label>From <input class="input sm" id="pt-from" value="${formatClock(from)}" size="6"></label><button class="btn ghost sm" id="pt-from-now">now</button><label>To <input class="input sm" id="pt-to" value="${clockUp(to)}" size="6"></label><button class="btn ghost sm" id="pt-to-now">now</button>`;
     const bindNow = () => {
       document.getElementById('pt-from-now')?.addEventListener('click', () => ((document.getElementById('pt-from') as HTMLInputElement).value = formatClock(nowMs())));
-      document.getElementById('pt-to-now')?.addEventListener('click', () => ((document.getElementById('pt-to') as HTMLInputElement).value = formatClock(nowMs())));
+      document.getElementById('pt-to-now')?.addEventListener('click', () => ((document.getElementById('pt-to') as HTMLInputElement).value = clockUp(nowMs())));
     };
     const closeForm = () => { form.innerHTML = ''; maskDraft = null; stage.querySelector('.maskdraw')?.remove(); refresh(); };
     const readRange = () => {
@@ -243,7 +245,7 @@ async function detail(id: string): Promise<void> {
     document.getElementById('pt-mask')!.addEventListener('click', () => {
       closeForm();
       vid.pause();
-      form.innerHTML = `<div class="ptform"><span class="faint small">${icon('crosshair')} Drag a rectangle over the part of the video you want to hide.</span><button class="btn ghost sm" id="pt-cancel">Cancel</button></div>`;
+      form.innerHTML = `<div class="ptform"><span class="faint small">${icon('crosshair')} Pause on a frame where the data is visible, then drag a rectangle over it.</span><button class="btn ghost sm" id="pt-cancel">Cancel</button></div>`;
       document.getElementById('pt-cancel')!.addEventListener('click', closeForm);
       const layer = document.createElement('div');
       layer.className = 'maskdraw';
@@ -258,7 +260,7 @@ async function detail(id: string): Promise<void> {
         const d = maskDraft; start = null;
         if (Math.abs(d.x2 - d.x1) < 0.01 || Math.abs(d.y2 - d.y1) < 0.01) { maskDraft = null; paintOverlay(); return; }
         layer.remove();
-        form.innerHTML = `<div class="ptform"><div class="seg" id="pt-type"><button class="on" data-t="blur">Blur</button><button data-t="redact">Black box</button></div>${timeInputs(nowMs(), Math.min(dur, nowMs() + 10_000))}<button class="btn primary sm" id="pt-add">Add mask</button><button class="btn ghost sm" id="pt-cancel2">Cancel</button></div><p class="faint small" style="margin:6px 0 0">Applies to the chosen time range. The original recording stays untouched on this device.</p>`;
+        form.innerHTML = `<div class="ptform"><div class="seg" id="pt-type"><button class="on" data-t="blur">Blur</button><button data-t="redact">Black box</button></div>${timeInputs(nowMs(), dur)}<button class="btn primary sm" id="pt-add">Add mask</button><button class="btn ghost sm" id="pt-cancel2">Cancel</button></div><p class="faint small" style="margin:6px 0 0">Hidden from this frame to the end of the recording unless you narrow it. Times follow the player clock (the context before Start included): seek, then press now. The original recording stays untouched on this device.</p>`;
         bindNow();
         let type: 'blur' | 'redact' = 'blur';
         form.querySelectorAll<HTMLElement>('#pt-type button').forEach((b) => b.addEventListener('click', () => { type = b.dataset.t as 'blur' | 'redact'; form.querySelectorAll('#pt-type button').forEach((x) => x.classList.toggle('on', x === b)); }));

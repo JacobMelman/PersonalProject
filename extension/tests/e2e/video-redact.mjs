@@ -100,6 +100,16 @@ try {
   await rv.mouse.move(...pt(REG.x + REG.w + 0.01, REG.y + REG.h + 0.01), { steps: 10 });
   await rv.mouse.up();
   await rv.waitForSelector('#pt-add');
+  // defaults are privacy-safe: a new mask runs to the end of the recording, and To never rounds short
+  const toSec = (v) => { const m = /^(\d+):(\d{2})$/.exec(v.trim()); return m ? Number(m[1]) * 60 + Number(m[2]) : NaN; };
+  const vdur = await rv.evaluate(() => document.getElementById('vid').duration);
+  const defTo = await rv.inputValue('#pt-to');
+  ok('a new mask runs to the end of the recording by default, rounded up', toSec(defTo) >= vdur - 0.5 && toSec(defTo) <= Math.ceil(vdur) + 1, `To=${defTo}, video ${vdur.toFixed(2)} s`);
+  ok('the form says to pause on the frame and that times follow the player clock', /player clock/i.test(await rv.locator('#pt-form').innerText()));
+  await rv.evaluate(() => { const v = document.getElementById('vid'); v.pause(); v.currentTime = 1.4; });
+  await rv.waitForFunction(() => Math.abs(document.getElementById('vid').currentTime - 1.4) < 0.05);
+  await rv.click('#pt-from-now'); await rv.click('#pt-to-now');
+  ok('"now" rounds From down and To up (whole seconds, never less hidden)', (await rv.inputValue('#pt-from')) === '00:01' && (await rv.inputValue('#pt-to')) === '00:02', `${await rv.inputValue('#pt-from')} - ${await rv.inputValue('#pt-to')}`);
   await rv.click('#pt-type [data-t="redact"]');
   await rv.fill('#pt-from', '0:00');
   await rv.fill('#pt-to', '0:30');

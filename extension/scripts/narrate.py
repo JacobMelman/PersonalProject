@@ -6,7 +6,8 @@
   narrate.py mix    <manifest.json> <timeline.json> <out.wav> <seconds>   place each scene's audio at its start time
 
 Each scene is a list of chunks {"say": spoken text, "show": caption text}. Chunks are synthesized one by one, so every
-caption has an exact start and end inside the scene; pauses follow the punctuation of the chunk.
+caption has an exact start and end inside the scene; pauses follow the punctuation of the chunk. "say" may contain Piper raw
+phoneme blocks, e.g. [[ ɹˈɛpɹoʊdˌɛsk ]] for the product name with the stress on the first syllable.
 """
 import json
 import sys
@@ -47,7 +48,7 @@ def cmd_config(out):
 
 
 def pause_after(text):
-    t = text.rstrip()
+    t = text.rstrip().removesuffix("]]").rstrip()  # a [[ raw phoneme ]] block may carry the closing punctuation
     if t.endswith((".", "!", "?")):
         return 0.42
     if t.endswith((",", ":", ";", "-")):
