@@ -107,7 +107,7 @@ const NARRATION = {
   armed: [C('Now it is armed.'), C('A rolling buffer keeps only the last ninety seconds, on this computer.', 'A rolling buffer keeps only the last 90 seconds, on this computer.'), C('No keystrokes are collected, and only this tab is recorded.')],
   test: [C('Test as usual.'), C('[[ ɹˈɛpɹoʊdˌɛsk ]] quietly keeps the latest moments in its buffer.', 'ReproDesk quietly keeps the latest moments in its buffer.')],
   replay: [C('Something looked wrong?'), C('Save last replay keeps what just happened.'), C('The shortcut is Alt, Shift, R. There is no need to reproduce it.', 'Shortcut: Alt+Shift+R. No need to reproduce it.')],
-  repro: [C('For a known bug, start a [[ ɹˈɛpɹoʊ ]] Session.', 'For a known bug, start a Repro Session.'), C('It records the whole path, plus thirty seconds of context from before the start.', 'It records the whole path, plus 30 seconds of context from before the start.')],
+  repro: [C('For a known bug, start a [[ ɹˈɛpɹoʊ ]] Session.', 'For a known bug, start a Repro Session.'), C('It records everything from Start to Finish,'), C('plus the thirty seconds before Start: only while armed, and only from this tab.', 'plus the 30 seconds before Start: only while Armed, and only from this tab.')],
   bug1: [C('Bug one: the promo code summer twenty shows a discount,', 'Bug 1: the promo code SUMMER20 shows a discount,'), C('but the total does not change.')],
   marker: [C('Add a marker to flag this moment.'), C('A screenshot is taken automatically.')],
   checkout: [C('Now the checkout form.'), C('Typed text is never stored as events.'), C('The video does show pixels, though,'), C('so we will hide sensitive values before sharing.')],
@@ -440,12 +440,15 @@ const caps = [];
 for (const [id, start] of Object.entries(timeline).sort((a, b) => a[1] - b[1])) for (const c of VOICE[id].chunks) caps.push({ s: start + c.start, e: start + c.end + 0.45, text: c.show });
 caps.forEach((c, i) => { const n = caps[i + 1]; c.e = Math.min(c.e, n ? n.s - 0.04 : dur - 0.3); });
 const ts = (t, srt) => { const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60; const sec = srt ? s.toFixed(3).replace('.', ',').padStart(6, '0') : s.toFixed(2).padStart(5, '0'); return srt ? `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${sec}` : `${h}:${String(m).padStart(2, '0')}:${sec}`; };
-/** At most two balanced lines, like broadcast / YouTube captions. */
+/** At most two balanced lines, like broadcast / YouTube captions; a break right after punctuation wins when both lines still fit. */
 const lines = (text, n = 44) => {
   if (text.length <= n) return [text];
   const mid = text.length / 2;
+  const spaces = [...text].map((c, i) => (c === ' ' ? i : -1)).filter((i) => i > 0);
+  const fits = (i) => i <= n + 4 && text.length - i - 1 <= n + 4;
+  const punct = spaces.filter((i) => /[,:;.]/.test(text[i - 1]) && fits(i));
   let best = -1;
-  for (let i = 0; i < text.length; i++) if (text[i] === ' ' && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+  for (const i of punct.length ? punct : spaces) if (best < 0 || Math.abs(i - mid) < Math.abs(best - mid)) best = i;
   return best < 0 ? [text] : [text.slice(0, best), text.slice(best + 1)];
 };
 writeFileSync(path.join(out, 'reprodesk-demo.en.srt'), caps.map((c, i) => `${i + 1}\n${ts(c.s, true)} --> ${ts(c.e, true)}\n${lines(c.text).join('\n')}\n`).join('\n'));
