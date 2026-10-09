@@ -117,8 +117,11 @@ const NARRATION = {
   timeline: [C('Click any row of the timeline to jump to that moment.')],
   editor: [C('Before sharing, hide sensitive data.'), C('Open a screenshot, blur the card number, and box the error.')],
   editorSave: [C('The original screenshot is never modified.'), C('Only the exported copy carries the blur.')],
-  videoMask: [C('Do the same for the video: mask the card field.'), C('The preview shows exactly what will be exported.')],
-  videoDone: [C('There: the card number is blurred in every frame.')],
+  videoFind: [C('Now the video. First, jump to a moment where the card number is on screen.')],
+  videoMask: [C('Drag a box over the card field.'), C('Blur it from the moment the number is typed until the error appears.')],
+  videoMask2: [C('The error message pushes the form down,'), C('so a second mask covers the field until the end.')],
+  videoPreview: [C('The preview shows exactly what will be exported.')],
+  videoDone: [C('Now the card number is hidden in every frame where it appears.')],
   describe: [C('Describe what happened, and what you expected.'), C('The expected result is always written by you.')],
   export: [C('One click exports an evidence package, an H T M L report, and a Word document.', 'One click exports an Evidence Package, an HTML report and a Word document.')],
   html: [C('The H T M L report is self contained, with the blurred screenshots,', 'The HTML report is self-contained, with the blurred screenshots,'), C('so developers can open it anywhere.')],
@@ -246,6 +249,8 @@ try {
     await clickEl(page, tabOff, '#exp'); await typeText('1228', 110);
     await clickEl(page, tabOff, '#cvv'); await typeText('123', 110); await beat(500);
   });
+  // where the card field sits before the error banner appears (the banner pushes the form down)
+  const cardPre = await page.eval(`(() => { const r = document.querySelector('#card').getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; })()`);
   await scene('bug2', async () => {
     await clickEl(page, tabOff, '#place'); await beat(2300);
     await clickEl(panel, panelOff, '#markerLabel'); await typeText('Order fails with E-4021', 55);
@@ -258,6 +263,7 @@ try {
     await beat(600);
   });
   const boxes = await page.eval(`(() => { const n = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; }; return { card: n('#card'), err: n('#error .err') }; })()`);
+  boxes.cardPre = cardPre;
 
   // ---- 8. privacy pause
   let blank = null;
@@ -318,27 +324,62 @@ try {
   });
 
   // ---- 11. video privacy tools
-  await smoothTo(rv, '.player', 'center');
-  await scene('videoMask', async () => {
-    await clickEl(rv, tabOff, '#pt-mask', { ms: 900 });
-    await sleep(500);
-    const vr = await rv.eval(`(() => { const v = document.getElementById('vid'); const r = v.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, vw: v.videoWidth, vh: v.videoHeight }; })()`);
-    const ar = vr.vw / vr.vh; let cw = vr.w, ch = vr.h; if (vr.w / vr.h > ar) cw = vr.h * ar; else ch = vr.w / ar;
-    const vc = { x: vr.x + (vr.w - cw) / 2, y: vr.y + (vr.h - ch) / 2, w: cw, h: ch };
+  // Video times of the card number: a timeline row click seeks the player, so the rows tell us (video time, pre-session context included).
+  const tt = await rv.eval(`(() => { const v = document.getElementById('vid'); const rows = [...document.querySelectorAll('#tl .tl')];
+    const at = (re) => { const r = rows.find((x) => re.test(x.textContent)); if (!r) return null; r.click(); return v.currentTime; };
+    const out = { card: at(/Card number/), place: at(/Place order/), dur: v.duration }; v.pause(); v.currentTime = 0; return out; })()`);
+  if (tt.card == null || tt.place == null || !Number.isFinite(tt.dur)) throw new Error('card / Place order not found in the timeline: ' + JSON.stringify(tt));
+  const playerGeo = () => rv.eval(`(() => { const v = document.getElementById('vid'); const r = v.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, vw: v.videoWidth, vh: v.videoHeight }; })()`);
+  const contentBox = (g) => { const ar = g.vw / g.vh; let cw = g.w, ch = g.h; if (g.w / g.h > ar) cw = g.h * ar; else ch = g.w / ar; return { x: g.x + (g.w - cw) / 2, y: g.y + (g.h - ch) / 2, w: cw, h: ch }; };
+  /** A real click on the player's seek bar, then the exact frame. */
+  async function seekTo(t) {
+    const g = await playerGeo();
+    const f = Math.min(1, Math.max(0, t / tt.dur)), inset = 16;
+    await click(Math.round(tabOff.dx + g.x + inset + (g.w - 2 * inset) * f), Math.round(tabOff.dy + g.y + g.h - 20), 650);
+    await rv.eval(`(() => { const v = document.getElementById('vid'); v.pause(); v.currentTime = ${t.toFixed(3)}; })()`);
+    await sleep(700);
+  }
+  async function maskOver(box) {
+    await clickEl(rv, tabOff, '#pt-mask', { ms: 800 });
+    await sleep(400);
+    const vc = contentBox(await playerGeo());
     const pad = 0.012;
-    await drag(pointAt(tabOff, vc, boxes.card[0] - pad / 2, boxes.card[1] - pad), pointAt(tabOff, vc, boxes.card[2] + pad / 2, boxes.card[3] + pad), 900);
-    await beat(700);
-    await clickEl(rv, tabOff, '#pt-from'); selectAll(); await typeText('0:00', 100);
-    await clickEl(rv, tabOff, '#pt-to'); selectAll(); await typeText('59:00', 100);
-    await clickEl(rv, tabOff, '#pt-add', { ms: 800 }); await beat(900);
+    await drag(pointAt(tabOff, vc, box[0] - pad / 2, box[1] - pad), pointAt(tabOff, vc, box[2] + pad / 2, box[3] + pad), 900);
+    await beat(500);
+  }
+  const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+  await smoothTo(rv, '#ptools', 'end');
+  await scene('videoFind', async () => {
+    await seekTo(tt.place - 0.4); // card, expiry and CVV are typed, the error has not appeared yet
+    await beat(1200);
+  });
+  await scene('videoMask', async () => {
+    await maskOver(boxes.cardPre);
+    await seekTo(Math.max(0, tt.card - 0.3)); await clickEl(rv, tabOff, '#pt-from-now', { ms: 600 });
+    await seekTo(Math.min(tt.dur, tt.place + 2.2)); await clickEl(rv, tabOff, '#pt-to-now', { ms: 600 }); // the banner shows 1.1 s after the click
+    await beat(500);
+    await clickEl(rv, tabOff, '#pt-add', { ms: 700 }); await beat(700);
+  });
+  await scene('videoMask2', async () => {
+    await maskOver(boxes.card);
+    await seekTo(tt.place + 0.2); await clickEl(rv, tabOff, '#pt-from-now', { ms: 600 });
+    await clickEl(rv, tabOff, '#pt-to'); selectAll(); await typeText(clock(Math.ceil(tt.dur)), 110); // "until the end": rounded up, never short
+    await beat(500);
+    await clickEl(rv, tabOff, '#pt-add', { ms: 700 }); await beat(700);
+  });
+  await scene('videoPreview', async () => {
     await clickEl(rv, tabOff, '#pt-preview', { ms: 800 });
   });
   for (let i = 0; i < 120; i++) { if (await rv.eval(`!!document.querySelector('#pt-form .badge')`)) break; await sleep(500); }
   await sleep(400);
+  const masks = await rv.eval(`[...document.querySelectorAll('#pt-list li')].map((li) => li.textContent.trim())`);
+  console.log('video masks:', JSON.stringify(masks), 'card typed at', tt.card.toFixed(2), 's, Place order at', tt.place.toFixed(2), 's, duration', tt.dur.toFixed(2), 's');
   await scene('videoDone', async () => {
-    await rv.eval(`(() => { const v = document.getElementById('vid'); v.pause(); v.currentTime = Math.max(0, v.duration - 5.5); v.muted = true; return v.play(); })()`).catch(() => undefined);
-    await beat(2400);
-  }, 1.0);
+    const from = Math.max(0, tt.card - 1.2);
+    await rv.eval(`(() => { const v = document.getElementById('vid'); v.pause(); v.currentTime = ${from.toFixed(3)}; v.muted = true; return v.play(); })()`).catch(() => undefined);
+    await beat(Math.min(11000, (tt.place + 3 - from) * 1000));
+    await rv.eval(`document.getElementById('vid').pause()`).catch(() => undefined);
+  }, 0.8);
   await clickEl(rv, tabOff, '#pt-preview', { ms: 700 }); await beat(600);
 
   // ---- 12. report and export
