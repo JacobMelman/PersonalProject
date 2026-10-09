@@ -67,10 +67,9 @@ jobs:
           if-no-files-found: ignore
 
   real-browser:
-    name: Real browser (Xvfb, genuine toolbar click) - experimental
+    name: Real browser (Xvfb, genuine toolbar click)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    continue-on-error: true # window geometry and X11 timing differ per runner image; failures are reported, not blocking yet
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
