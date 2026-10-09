@@ -1,0 +1,83 @@
+{
+  "type": "object",
+  "properties": {
+    "AllowedTargetOrigins": {
+      "title": "Sites where ReproDesk may be armed",
+      "description": "Origin patterns (scheme://host[:port], e.g. https://*.example.com or http://localhost:*). If set, ReproDesk refuses to arm anywhere else. Empty or unset means no restriction.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "BlockedOrigins": {
+      "title": "Sites where ReproDesk must never run",
+      "description": "Origin patterns. Wins over the allow-list. A running capture on a newly blocked site is stopped.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ApprovedOrigins": {
+      "title": "Extra approved origins (same Target Profile)",
+      "description": "Plain origins such as https://sso.example.com that are added to every user's approved scope (for example SSO or payment domains).",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ReplayWindowSec": {
+      "title": "Rolling replay window (seconds)",
+      "description": "Fixes the Instant Replay window. The user can no longer change it.",
+      "type": "integer",
+      "enum": [30, 60, 90, 120]
+    },
+    "PostTriggerTailSec": {
+      "title": "Post-trigger tail (seconds)",
+      "type": "integer",
+      "enum": [0, 3, 5, 10]
+    },
+    "PreSessionContextSec": {
+      "title": "Pre-session context (seconds)",
+      "type": "integer",
+      "enum": [0, 30]
+    },
+    "AfkAutoPauseMinutes": {
+      "title": "AFK auto-pause after idle minutes (0 = off)",
+      "type": "integer",
+      "enum": [0, 5, 10, 15, 30]
+    },
+    "MarkerScreenshots": {
+      "title": "Take a screenshot with every marker",
+      "type": "boolean"
+    },
+    "VideoCaptureAllowed": {
+      "title": "Allow video capture",
+      "description": "false = video is forbidden: ReproDesk only works in Screenshot-only mode. true = not forbidden (the user's own choice stays).",
+      "type": "boolean"
+    },
+    "EnvironmentLabel": {
+      "title": "Environment label shown in every report",
+      "type": "string"
+    },
+    "AllowedExportFormats": {
+      "title": "Allowed export formats",
+      "description": "Subset of zip, html, docx, xlsx, txt, md. Unset means all. An explicit list with no known format means none.",
+      "type": "array",
+      "items": { "type": "string", "enum": ["zip", "html", "docx", "xlsx", "txt", "md"] }
+    },
+    "AllowUnredactedOriginals": {
+      "title": "Allow exporting unredacted original screenshots",
+      "description": "false = the 'include original screenshots' switch disappears and originals never leave the device.",
+      "type": "boolean"
+    },
+    "RequireExportConfirmation": {
+      "title": "Ask the user to confirm before every export",
+      "description": "Shows a reminder that video and screenshots may contain sensitive visible data.",
+      "type": "boolean"
+    },
+    "SessionRetentionDays": {
+      "title": "Delete finished sessions after N days (0 = keep)",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3650
+    },
+    "SampleSessionsEnabled": {
+      "title": "Offer bundled sample sessions",
+      "type": "boolean"
+    }
+  }
+}

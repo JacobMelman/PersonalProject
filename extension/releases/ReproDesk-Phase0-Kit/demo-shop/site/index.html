@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Northwind Gear - Demo shop</title>
+<style>
+@font-face{font-family:'Inter';src:url(/fonts/inter-latin.woff2) format('woff2');font-weight:100 900;font-display:swap}
+:root{--ink:#14213d;--muted:#5d6b82;--line:#e5e9f0;--bg:#f6f4ef;--card:#fff;--accent:#ff6b35;--accent-2:#e4491b;--green:#1d9e5a;--blue:#2457ff;--radius:16px}
+*{box-sizing:border-box} body{margin:0;font:15px/1.5 'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+a{color:inherit;text-decoration:none} button,input{font:inherit;color:inherit}
+svg.i{width:1.2em;height:1.2em;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.2em}
+header{position:sticky;top:0;z-index:5;background:rgba(246,244,239,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar{max-width:1120px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:22px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px;letter-spacing:-.4px}.logo span{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:var(--ink);color:#fff}
+nav{display:flex;gap:6px;margin-left:8px}nav a{padding:7px 13px;border-radius:99px;font-weight:600;color:var(--muted)}nav a:hover,nav a.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(20,33,61,.1)}
+.search{margin-left:auto;display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:99px;background:#fff;border:1px solid var(--line);width:260px;color:var(--muted)}.search input{border:0;outline:0;background:transparent;width:100%}
+.cartbtn{position:relative;display:grid;place-items:center;width:42px;height:42px;border-radius:99px;background:var(--ink);color:#fff}
+.cartbtn b{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;border-radius:99px;background:var(--accent);font-size:11px;display:grid;place-items:center;padding:0 5px}
+main{max-width:1120px;margin:0 auto;padding:26px 24px 70px}
+.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:20px;align-items:center;padding:42px;border-radius:26px;background:linear-gradient(120deg,#14213d,#27407a 70%,#3e63c9);color:#fff;overflow:hidden;position:relative}
+.hero h1{font-size:44px;line-height:1.05;letter-spacing:-1.4px;margin:0 0 14px}.hero p{color:#cbd6f2;max-width:430px;margin:0 0 22px;font-size:16px}
+.hero .art{display:grid;place-items:center;font-size:140px;opacity:.95;color:#ffb394}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:700;cursor:pointer;box-shadow:0 6px 16px -6px rgba(228,73,27,.6)}.btn:hover{background:var(--accent-2)}
+.btn.ghost{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(20,33,61,.12);border:1px solid var(--line)}.btn.dark{background:var(--ink);box-shadow:none}.btn[disabled]{opacity:.6;cursor:wait}
+h2{font-size:24px;letter-spacing:-.6px;margin:34px 0 16px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;transition:box-shadow .15s,transform .15s}.card:hover{box-shadow:0 14px 30px -14px rgba(20,33,61,.3);transform:translateY(-2px)}
+.card .img{height:150px;display:grid;place-items:center;font-size:62px;color:#fff}
+.card .b{padding:14px 16px 16px}.card h3{margin:0 0 3px;font-size:16px;letter-spacing:-.2px}.card .r{color:var(--muted);font-size:13px;display:flex;gap:6px;align-items:center}.card .r i{color:#f5a623;font-style:normal}
+.card .f{display:flex;align-items:center;justify-content:space-between;margin-top:12px}.price{font-size:19px;font-weight:800;letter-spacing:-.4px}
+.tag{position:absolute;margin:12px;padding:3px 9px;border-radius:99px;background:#fff;color:var(--ink);font-size:11px;font-weight:700}
+.cols{display:grid;grid-template-columns:1.5fr 1fr;gap:22px;align-items:start}
+.panel{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:20px}.panel h3{margin:0 0 14px;font-size:17px}
+.line{display:grid;grid-template-columns:56px 1fr auto auto;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}.line:last-child{border-bottom:0}
+.line .th{width:56px;height:56px;border-radius:12px;display:grid;place-items:center;color:#fff;font-size:26px}
+.qty{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;overflow:hidden}.qty button{width:30px;height:30px;border:0;background:#fff;cursor:pointer;font-weight:700}.qty span{width:30px;text-align:center;font-weight:600}
+.row{display:flex;justify-content:space-between;padding:7px 0;color:var(--muted)}.row.total{border-top:1px solid var(--line);margin-top:8px;padding-top:14px;color:var(--ink);font-size:19px;font-weight:800}.row .disc{color:var(--green);font-weight:700}
+.promo{display:flex;gap:8px;margin:14px 0}.promo input,.fld input{flex:1;height:42px;padding:0 13px;border-radius:11px;border:1px solid #cfd6e2;background:#fff;outline:0}.promo input:focus,.fld input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(36,87,255,.15)}
+.ok{color:var(--green);font-weight:600;font-size:13px;margin-top:-4px}
+.fld{display:grid;gap:6px;margin-bottom:14px}.fld label{font-size:13px;font-weight:600;color:var(--muted)}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.fld input{width:100%;flex:none}
+.err{display:flex;gap:10px;align-items:flex-start;margin:0 0 14px;padding:12px 14px;border-radius:12px;background:#fdecec;border:1px solid #f4b6b6;color:#8b1d1d;font-weight:500}
+.crumb{display:flex;gap:8px;color:var(--muted);margin:0 0 6px;font-size:13px}
+.empty{text-align:center;padding:60px 20px;color:var(--muted)}
+@media(max-width:860px){.hero,.cols{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}.search{display:none}}
+</style></head>
+<body>
+<header><div class="bar"><a href="/" data-link class="logo" aria-label="Northwind Gear home"><span><svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <circle cx="12" cy="12" r="10" /> <path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z" /> </svg> </span>Northwind&nbsp;Gear</a>
+<nav><a href="/" data-link id="nav-shop">Shop</a><a href="/cart" data-link id="nav-cart">Cart</a></nav>
+<label class="search"><svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" /> </svg> <input type="search" placeholder="Search gear" aria-label="Search gear"></label>
+<a class="cartbtn" href="/cart" data-link aria-label="Open cart"><svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="m2.05 2.05 1.099-.028a1 1 0 0 1 1.008.815l2.69 14.347A1 1 0 0 0 7.83 18H18" /> <path d="M4.563 5h16.435a1 1 0 0 1 .981 1.204l-1.026 6.226A2 2 0 0 1 18.962 14H6.25" /> <circle cx="18" cy="20" r="2" /> <circle cx="8" cy="20" r="2" /> </svg> <b id="count">0</b></a></div></header>
+<main id="view"></main>
+<script>
+const P = [
+  {id:'backpack', name:'Trailhead 40L Backpack', price:89, rating:'4.8', tag:'Bestseller', bg:'linear-gradient(135deg,#ff9a62,#ff6b35)', icon:`<svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /> <path d="M8 10h8" /> <path d="M8 18h8" /> <path d="M8 22v-6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v6" /> <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /> </svg> `},
+  {id:'tent', name:'Ridgeline 2P Tent', price:249, rating:'4.7', tag:'New', bg:'linear-gradient(135deg,#4f7cff,#2457ff)', icon:`<svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="M3.5 21 14 3" /> <path d="M20.5 21 10 3" /> <path d="M15.5 21 12 15l-3.5 6" /> <path d="M2 21h20" /> </svg> `},
+  {id:'boots', name:'Summit Trail Boots', price:139, rating:'4.6', tag:'', bg:'linear-gradient(135deg,#34c38f,#1d9e5a)', icon:`<svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z" /> <path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z" /> <path d="M16 17h4" /> <path d="M4 13h4" /> </svg> `},
+  {id:'lamp', name:'Beacon Headlamp', price:34, rating:'4.5', tag:'', bg:'linear-gradient(135deg,#ffcb52,#f59e0b)', icon:`<svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="M12 13v1" /> <path d="M17 2a1 1 0 0 1 1 1v4a3 3 0 0 1-.6 1.8l-.6.8A4 4 0 0 0 16 12v8a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-8a4 4 0 0 0-.8-2.4l-.6-.8A3 3 0 0 1 6 7V3a1 1 0 0 1 1-1z" /> <path d="M6 6h12" /> </svg> `},
+  {id:'compass', name:'Pathfinder Compass', price:24, rating:'4.9', tag:'Top rated', bg:'linear-gradient(135deg,#8b7bff,#5b45e0)', icon:`<svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <circle cx="12" cy="12" r="10" /> <path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z" /> </svg> `},
+  {id:'bottle', name:'Insulated Bottle 1L', price:29, rating:'4.4', tag:'', bg:'linear-gradient(135deg,#3cc2d6,#1996ab)', icon:`<svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="m6 8 1.75 12.28a2 2 0 0 0 2 1.72h4.54a2 2 0 0 0 2-1.72L18 8" /> <path d="M5 8h14" /> <path d="M7 15a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0" /> <path d="m12 8 1-6h2" /> </svg> `},
+];
+const cart = JSON.parse(sessionStorage.getItem('cart') || '[]'); let promo = sessionStorage.getItem('promo') || '';
+const save = () => { sessionStorage.setItem('cart', JSON.stringify(cart)); sessionStorage.setItem('promo', promo); document.getElementById('count').textContent = cart.reduce((a, c) => a + c.q, 0); };
+const money = n => '$' + n.toFixed(2);
+const sub = () => cart.reduce((a, c) => a + P.find(p => p.id === c.id).price * c.q, 0);
+const discount = () => promo === 'SUMMER20' ? sub() * 0.2 : 0;
+const shipping = () => sub() > 150 ? 0 : (cart.length ? 9 : 0);
+// BUG 1 (deliberate, for the demo): the discount row is shown but the total ignores it.
+const total = () => sub() + shipping();
+const view = document.getElementById('view');
+const route = {
+  '/'() { return `<section class="hero"><div><h1>Gear up for the trail.</h1><p>Lightweight, field-tested equipment for weekend hikes and week-long expeditions. Free shipping over $150.</p><a class="btn" href="/#shop" data-scroll id="cta">Shop bestsellers <svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="M5 12h14" /> <path d="m12 5 7 7-7 7" /> </svg> </a></div><div class="art"><svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="m8 3 4 8 5-5 5 15H2L8 3z" /> </svg> </div></section>
+    <h2 id="shop">Popular this week</h2><div class="grid">${P.map(p => `<article class="card" data-id="${p.id}"><div class="img" style="background:${p.bg}">${p.icon}</div><div class="b"><h3>${p.name}</h3><div class="r"><i>★</i>${p.rating} <span>· ${p.tag || 'In stock'}</span></div><div class="f"><span class="price">${money(p.price)}</span><button class="btn dark add" data-add="${p.id}" aria-label="Add ${p.name} to cart">Add to cart</button></div></div></article>`).join('')}</div>`; },
+  '/cart'() { if (!cart.length) return `<div class="empty"><h2>Your cart is empty</h2><a class="btn" href="/" data-link>Continue shopping</a></div>`;
+    return `<div class="crumb">Cart</div><h1 style="margin:0 0 18px;letter-spacing:-.8px">Your cart</h1><div class="cols"><div class="panel"><h3>Items</h3>${cart.map(c => { const p = P.find(x => x.id === c.id); return `<div class="line"><div class="th" style="background:${p.bg}">${p.icon}</div><div><b>${p.name}</b><div class="muted" style="color:var(--muted);font-size:13px">${money(p.price)} each</div></div><div class="qty"><button data-dec="${c.id}" aria-label="Decrease quantity">−</button><span>${c.q}</span><button data-inc="${c.id}" aria-label="Increase quantity">+</button></div><b>${money(p.price * c.q)}</b></div>`; }).join('')}</div>
+    <div class="panel"><h3>Order summary</h3><div class="row"><span>Subtotal</span><span>${money(sub())}</span></div><div class="row"><span>Shipping</span><span>${shipping() ? money(shipping()) : 'Free'}</span></div>${discount() ? `<div class="row"><span>Promo ${promo}</span><span class="disc">−${money(discount())}</span></div>` : ''}<div class="promo"><input id="promo" placeholder="Promo code" value="${promo}" aria-label="Promo code"><button class="btn ghost" id="apply">Apply</button></div>${promo === 'SUMMER20' ? `<div class="ok">${'<svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <circle cx="12" cy="12" r="10" /> <path d="m16 9-5.5 5.5L8 12" /> </svg> '} 20% discount applied</div>` : ''}<div class="row total"><span>Total</span><span id="total">${money(total())}</span></div><a class="btn" style="width:100%;justify-content:center;margin-top:14px" href="/checkout" data-link id="checkout-btn">Checkout</a></div></div>`; },
+  '/checkout'() { return `<div class="crumb">Cart › Checkout</div><h1 style="margin:0 0 18px;letter-spacing:-.8px">Checkout</h1><div class="cols"><form class="panel" id="pay" autocomplete="off"><h3>Shipping &amp; payment</h3><div id="error"></div>
+    <div class="fld"><label for="name">Full name</label><input id="name" name="name" placeholder="Alex Morgan"></div><div class="fld"><label for="email">Email</label><input id="email" name="email" type="email" placeholder="alex@example.com"></div>
+    <div class="fld"><label for="card">Card number</label><input id="card" name="card" inputmode="numeric" placeholder="4242 4242 4242 4242"></div><div class="two"><div class="fld"><label for="exp">Expiry</label><input id="exp" name="exp" placeholder="MM / YY"></div><div class="fld"><label for="cvv">CVV</label><input id="cvv" name="cvv" type="password" placeholder="•••"></div></div>
+    <button class="btn" id="place" type="submit" style="width:100%;justify-content:center;height:46px">Place order · ${money(total())}</button></form>
+    <div class="panel"><h3>Summary</h3>${cart.map(c => { const p = P.find(x => x.id === c.id); return `<div class="row"><span>${c.q} × ${p.name}</span><span>${money(p.price * c.q)}</span></div>`; }).join('')}<div class="row total"><span>Total</span><span>${money(total())}</span></div></div></div>`; },
+};
+function render() { const p = location.pathname; view.innerHTML = (route[p] || route['/'])(); document.querySelectorAll('nav a').forEach(a => a.classList.toggle('on', a.getAttribute('href') === p)); save(); document.title = 'Northwind Gear - ' + (p === '/' ? 'Shop' : p.slice(1)); }
+function go(href) { history.pushState({}, '', href); render(); window.scrollTo(0, 0); }
+document.addEventListener('click', e => {
+  const l = e.target.closest('[data-link]'); if (l) { e.preventDefault(); return go(l.getAttribute('href')); }
+  const s = e.target.closest('[data-scroll]'); if (s) { e.preventDefault(); document.getElementById('shop').scrollIntoView({ behavior: 'smooth' }); return; }
+  const a = e.target.closest('[data-add]'); if (a) { const c = cart.find(x => x.id === a.dataset.add); c ? c.q++ : cart.push({ id: a.dataset.add, q: 1 }); save(); a.textContent = 'Added ✓'; setTimeout(() => (a.textContent = 'Add to cart'), 900); return; }
+  const inc = e.target.closest('[data-inc]'), dec = e.target.closest('[data-dec]');
+  if (inc || dec) { const id = (inc || dec).dataset.inc || (inc || dec).dataset.dec; const c = cart.find(x => x.id === id); c.q += inc ? 1 : -1; if (c.q <= 0) cart.splice(cart.indexOf(c), 1); save(); return render(); }
+  if (e.target.closest('#apply')) { promo = document.getElementById('promo').value.trim().toUpperCase(); save(); return render(); }
+});
+document.addEventListener('submit', e => { if (e.target.id !== 'pay') return; e.preventDefault(); const b = document.getElementById('place'); b.disabled = true; b.textContent = 'Processing…';
+  // BUG 2 (deliberate, for the demo): the order never goes through.
+  setTimeout(() => { b.disabled = false; b.textContent = 'Place order · ' + money(total()); document.getElementById('error').innerHTML = `<div class="err" role="alert"><svg class="i" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" > <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /> </svg> <div><b>Something went wrong</b><br>We could not place your order. Please try again later. (E-4021)</div></div>`; }, 1100); });
+addEventListener('popstate', render); render();
+</script></body></html>
