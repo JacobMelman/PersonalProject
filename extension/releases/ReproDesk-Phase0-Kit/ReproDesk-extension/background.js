@@ -583,17 +583,19 @@ async function startRepro(afkOverride = !1) {
     await dispatch({ type: "START_REPRO", sessionId: rec.id, now, afkOverride });
   }
 }
-async function finishRepro() {
+async function finishRepro(opts = {}) {
   let sid = (await getState()).sessionId;
   if (!sid) return;
   await sendOff({ kind: "off", op: "pin-stop", sessionId: sid }), await systemEvent("Repro Session finished", void 0, sid);
   let settings = await getSettings();
-  await dispatch({ type: "FINISH_REPRO" }), await finalizeSession(sid, { status: "finished" }), settings.openReviewAfterSave && await openReview(sid);
+  await dispatch({ type: "FINISH_REPRO" }), await finalizeSession(sid, { status: "finished" }), (opts.openReport || settings.openReviewAfterSave) && await openReview(sid);
 }
-async function finishShotSession() {
+async function finishShotSession(opts = {}) {
   let s = await getState(), sid = s.sessionId ?? s.shotSessionId;
   if (!sid) return;
-  await finalizeSession(sid, { status: "finished" }), await dispatch(s.sessionId ? { type: "FINISH_REPRO" } : { type: "SET_SHOT_SESSION", sessionId: null }), (await getSettings()).openReviewAfterSave && await openReview(sid);
+  await finalizeSession(sid, { status: "finished" }), await dispatch(s.sessionId ? { type: "FINISH_REPRO" } : { type: "SET_SHOT_SESSION", sessionId: null });
+  let settings = await getSettings();
+  (opts.openReport || settings.openReviewAfterSave) && await openReview(sid);
 }
 var shotQueue = [], shotRunning = !1;
 async function drainShots() {
@@ -843,10 +845,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return saveReplay();
         case "startRepro":
           return startRepro(!!c.payload?.afkOverride);
+        // the panel buttons say "Finish & review" / "... & open report": they always open the report
         case "finishRepro":
-          return (await getState()).mode === "repro" ? finishRepro() : finishShotSession();
+          return (await getState()).mode === "repro" ? finishRepro({ openReport: !0 }) : finishShotSession({ openReport: !0 });
         case "finishShotSession":
-          return finishShotSession();
+          return finishShotSession({ openReport: !0 });
         case "marker":
           return addMarker(c.payload?.label);
         case "screenshot":

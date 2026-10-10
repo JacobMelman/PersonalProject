@@ -57,9 +57,11 @@ try {
   await click('marker'); await sleep(2800);
   await realClick(page, '#checkout-btn'); await sleep(1500);
   await type(page, '#name', 'Alex Morgan'); await type(page, '#email', 'alex@example.com'); await type(page, '#card', '4242424242424242'); await type(page, '#exp', '1228'); await type(page, '#cvv', '123');
+  // the error banner pushes the form down, so the card field has a position before and after Place order
+  const cardPre = await page.eval(`(() => { const r = document.querySelector('#card').getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; })()`);
   await realClick(page, '#place'); await sleep(2600);
   // where the card field and the error sit, normalised to the viewport (= the captured frame), for the redaction scenes below
-  const boxes = await page.eval(`(() => { const n = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; }; return { card: n('#card'), err: n('#error .err') }; })()`);
+  const boxes = { cardPre, ...(await page.eval(`(() => { const n = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; }; return { card: n('#card'), err: n('#error .err') }; })()`)) };
   await label('Order fails with E-4021'); await sleep(500); await click('marker'); await sleep(3000);
   S('05-bug-captured.png');
   // Privacy Pause: the tester glances at another tab
@@ -108,17 +110,29 @@ try {
     await drag(rv, at(c, boxes.err[0] - pad, boxes.err[1] - pad), at(c, boxes.err[2] + pad, boxes.err[3] + pad));
     await sleep(500); S('11-editor.png');
     await rv.eval(`document.getElementById('ed-save').click()`); await sleep(1200);
-    // privacy tools on the replay: blur the card field for the whole recording
-    await rv.eval(`window.scrollTo(0, 0)`); await sleep(300);
-    await rv.eval(`document.getElementById('pt-mask').click()`); await sleep(500);
-    const vr = await rv.eval(`(() => { const v = document.getElementById('vid'); v.scrollIntoView({ block: 'center' }); const r = v.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, vw: v.videoWidth, vh: v.videoHeight, dur: v.duration }; })()`);
-    await sleep(400);
-    const vr2 = await rv.eval(`(() => { const r = document.getElementById('vid').getBoundingClientRect(); return { x: r.x, y: r.y }; })()`);
-    const ar = vr.vw / vr.vh; let cw = vr.w, ch = vr.h; if (vr.w / vr.h > ar) cw = vr.h * ar; else ch = vr.w / ar;
-    const vc = { x: vr2.x + (vr.w - cw) / 2, y: vr2.y + (vr.h - ch) / 2, w: cw, h: ch };
-    await drag(rv, at(vc, boxes.card[0] - pad / 2, boxes.card[1] - pad), at(vc, boxes.card[2] + pad / 2, boxes.card[3] + pad));
-    await sleep(500);
-    await rv.eval(`(() => { document.getElementById('pt-from').value = '0:00'; document.getElementById('pt-to').value = '59:00'; document.getElementById('pt-add').click(); })()`); await sleep(800);
+    // privacy tools on the replay, done the way the Review page asks: on a frame where the number is visible, for the time it is
+    // visible. Two masks, because the error banner moves the field down. Times from the timeline rows (a row click seeks the player).
+    const tt = await rv.eval(`(() => { const v = document.getElementById('vid'); const rows = [...document.querySelectorAll('#tl .tl')];
+      const at = (re) => { const r = rows.find((x) => re.test(x.textContent)); if (!r) return null; r.click(); return v.currentTime; };
+      const o = { card: at(/Card number/), place: at(/Place order/) }; v.pause(); return o; })()`);
+    if (tt.card == null || tt.place == null) throw new Error('card / Place order rows not found in the timeline');
+    const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+    const seek = async (t) => { await rv.eval(`(() => { const v = document.getElementById('vid'); v.pause(); v.currentTime = ${t.toFixed(3)}; })()`); await sleep(700); };
+    const maskOver = async (box) => {
+      await rv.eval(`document.getElementById('pt-mask').click()`); await sleep(500);
+      const vr = await rv.eval(`(() => { const v = document.getElementById('vid'); const r = v.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, vw: v.videoWidth, vh: v.videoHeight }; })()`);
+      const ar = vr.vw / vr.vh; let cw = vr.w, ch = vr.h; if (vr.w / vr.h > ar) cw = vr.h * ar; else ch = vr.w / ar;
+      const vc = { x: vr.x + (vr.w - cw) / 2, y: vr.y + (vr.h - ch) / 2, w: cw, h: ch };
+      await drag(rv, at(vc, box[0] - pad / 2, box[1] - pad), at(vc, box[2] + pad / 2, box[3] + pad));
+      await sleep(500);
+    };
+    await rv.eval(`document.getElementById('vid').scrollIntoView({ block: 'center' })`); await sleep(400);
+    await seek(tt.place - 0.4); // number typed, error not shown yet
+    await maskOver(boxes.cardPre);
+    await rv.eval(`(() => { document.getElementById('pt-from').value = ${JSON.stringify(clock(Math.max(0, tt.card - 0.3)))}; document.getElementById('pt-to').value = ${JSON.stringify(clock(Math.ceil(tt.place + 2.2)))}; document.getElementById('pt-add').click(); })()`); await sleep(800);
+    await seek(tt.place + 2.5); // error shown, field moved down
+    await maskOver(boxes.card);
+    await rv.eval(`(() => { document.getElementById('pt-from').value = ${JSON.stringify(clock(tt.place + 0.2))}; document.getElementById('pt-add').click(); })()`); await sleep(800); // To: the default end of the recording
     await rv.eval(`(() => { const v = document.getElementById('vid'); v.pause(); v.currentTime = Math.max(0, v.duration - 5.5); })()`); await sleep(1200);
     S('12-video-privacy.png');
     await rv.eval(`document.getElementById('pt-preview').click()`);

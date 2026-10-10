@@ -2,7 +2,7 @@
 
 This is the **Phase 0 engineering-spike build**, not a product release. The table maps every Phase 0 spike of the spec (section 20.1) to what exists in this
 repository, what is covered by automated tests, and what still has to be validated by a person on a real machine. Checks come from four layers:
-Vitest (`npm test`, 91 tests), headless Playwright e2e (`npm run test:e2e`, 181 checks incl. screenshot editor, video redaction, sample sessions, an axe accessibility audit and administrator policies), and the **real-browser suites** (`npm run test:real`, 87 checks; `npm run soak:*`; `tests/real/memslope.mjs`): headed Chromium under Xvfb driven
+Vitest (`npm test`, 91 tests), headless Playwright e2e (`npm run test:e2e`, 183 checks incl. screenshot editor, video redaction, sample sessions, an axe accessibility audit and administrator policies), and the **real-browser suites** (`npm run test:real`, 87 checks; `npm run soak:*`; `tests/real/memslope.mjs`): headed Chromium under Xvfb driven
 by genuine X11 input (xdotool), a raw CDP client attached to page targets only (so Chrome can really recycle the service worker), real toolbar clicks, real keyboard
 shortcuts, real `chrome.idle`, the real permission prompt, and an OS window drawn over the browser. The one thing none of them can be is **official Google Chrome on
 your machine and your application** - that is what the right-hand column is for. Raw results (screenshots, CSVs, JSON): `docs/phase0-results/`.
@@ -41,6 +41,8 @@ your machine and your application** - that is what the right-hand column is for.
 4. Semantics gaps: events inside open Shadow DOM and in iframes of approved origins are now recorded, and big containers no longer produce giant labels.
 5. **Accessibility defects** found by the axe audit and fixed: low-contrast secondary text and status badges (new text-safe ink tokens), three switches and four inputs without accessible names, two scrollable regions that were not keyboard-focusable, side panel without a page heading.
 6. **Marker screenshots failed on a still page** (found while filming the demo): tab capture only delivers frames when the screen changes, and screenshots refused any frame older than 5 s, so a marker on a page that had not moved for a few seconds logged "Screenshot failed". The recorder now keeps the newest frame (dropped on every pause, so nothing from before a pause is reused) and the worker falls back to a direct capture of the same validated tab; regression test `tests/e2e/static-shot.mjs` (still page, change-then-mark freshness check).
+7. **Video mask ended 10 s after the frame** (found while re-filming the demo): a new mask defaulted to *frame + 10 s*, the From/To fields cut the end down to the whole second below, and the hint did not say that times follow the player clock (which includes the Pre-session context, unlike the timeline). Data that stayed on screen longer was left visible in the export. A new mask now covers the frame to the end of the recording, the end time is rounded up, the *now* buttons do the same, and the hint explains the clock; regression checks in `tests/e2e/video-redact.mjs`.
+8. **"Finish & review" did not open the report** when *Open report after saving* was off: the button finished the session but followed the setting. A button that says "review" now always opens the report; the shortcut and Disarm still follow the setting. Regression check in `tests/e2e/static-shot.mjs`.
 
 ## Differences from the spec worth knowing
 
