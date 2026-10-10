@@ -387,7 +387,8 @@ export async function startRepro(afkOverride = false): Promise<void> {
   }
 }
 
-export async function finishRepro(): Promise<void> {
+/** `openReport`: the person pressed "Finish & review" (or "... & open report"), so the report opens whatever the setting says. */
+export async function finishRepro(opts: { openReport?: boolean } = {}): Promise<void> {
   const s = await getState();
   const sid = s.sessionId;
   if (!sid) return;
@@ -396,17 +397,17 @@ export async function finishRepro(): Promise<void> {
   const settings = await getSettings();
   await dispatch({ type: 'FINISH_REPRO' });
   await finalizeSession(sid, { status: 'finished' });
-  if (settings.openReviewAfterSave) await openReview(sid);
+  if (opts.openReport || settings.openReviewAfterSave) await openReview(sid);
 }
 
-export async function finishShotSession(): Promise<void> {
+export async function finishShotSession(opts: { openReport?: boolean } = {}): Promise<void> {
   const s = await getState();
   const sid = s.sessionId ?? s.shotSessionId;
   if (!sid) return;
   await finalizeSession(sid, { status: 'finished' });
   await dispatch(s.sessionId ? { type: 'FINISH_REPRO' } : { type: 'SET_SHOT_SESSION', sessionId: null });
   const settings = await getSettings();
-  if (settings.openReviewAfterSave) await openReview(sid);
+  if (opts.openReport || settings.openReviewAfterSave) await openReview(sid);
 }
 
 // ---------------------------------------------------------------- markers + screenshots

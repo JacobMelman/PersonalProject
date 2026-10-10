@@ -48,8 +48,9 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, sendResponse) => {
       switch (c.cmd) {
         case 'saveReplay': return saveReplay();
         case 'startRepro': return startRepro(!!c.payload?.afkOverride);
-        case 'finishRepro': return (await getState()).mode === 'repro' ? finishRepro() : finishShotSession();
-        case 'finishShotSession': return finishShotSession();
+        // the panel buttons say "Finish & review" / "... & open report": they always open the report
+        case 'finishRepro': return (await getState()).mode === 'repro' ? finishRepro({ openReport: true }) : finishShotSession({ openReport: true });
+        case 'finishShotSession': return finishShotSession({ openReport: true });
         case 'marker': return addMarker(c.payload?.label as string | undefined);
         case 'screenshot': return takeScreenshot();
         case 'manualPause': await dispatch({ type: 'MANUAL_PAUSE' }); return;

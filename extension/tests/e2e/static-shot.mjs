@@ -1,6 +1,6 @@
 // Marker screenshots on a STATIC page. Tab capture only delivers frames when something on screen changes, so after a few quiet
 // seconds there is no "fresh" frame. A marker or a screenshot must still produce the correct image (found while filming the demo).
-import { launch, newReporter, rmProfile, sleep, startSite, tmpProfile } from './lib.mjs';
+import { keyInfo, launch, newReporter, rmProfile, sleep, startSite, tmpProfile } from './lib.mjs';
 
 const PORT = 4183;
 const server = await startSite(PORT);
@@ -46,6 +46,17 @@ try {
   }, last.file);
   ok('that screenshot shows the changed page (red background), not a stale frame', px[0] > 200 && px[1] < 60 && px[2] < 60, JSON.stringify(px));
   ok('no screenshot failure was logged', (await failures()).length === 0, JSON.stringify(await failures()));
+
+  // "Finish & review" says it opens the report, so it does - even with "Open report after saving" off (set above)
+  const panel = await ctx.newPage();
+  await panel.goto(`chrome-extension://${keyInfo.id}/sidepanel.html`);
+  await panel.waitForSelector('[data-c="finishRepro"]');
+  const opened = ctx.waitForEvent('page', { predicate: (p) => p.url().includes('/review.html'), timeout: 10000 }).catch(() => null);
+  await panel.click('[data-c="finishRepro"]');
+  const rv = await opened;
+  ok('"Finish & review" opens the report even when "Open report after saving" is off', !!rv, rv ? 'review tab opened' : 'no review tab');
+  const fin = await until(async () => (await dump('sessions')).some((x) => x.kind === 'repro' && x.status === 'finished'), 5000);
+  ok('and the session is finished', !!fin);
 } catch (e) {
   console.error('static-shot e2e aborted:', e instanceof Error ? e.stack : e);
   rep.fail();
