@@ -13,7 +13,7 @@ const server = await startSite(PORT);
 const rep = newReporter();
 const ok = rep.ok;
 const userData = tmpProfile();
-const { ctx, rd, setSettings, dump, until, activeTabId, state } = await launch(userData);
+const { ctx, rd, setSettings, dump, until, activeTabId, state, health } = await launch(userData);
 const out = mkdtempSync(path.join(tmpdir(), 'rd-gap-'));
 const RED = 'rgb(220, 30, 30)', GREEN = 'rgb(20, 170, 40)', BLUE = 'rgb(30, 60, 220)';
 
@@ -93,10 +93,15 @@ try {
   await shop.goto(`http://localhost:${PORT}/`);
   await shop.bringToFront();
   await paint(shop, RED);
+  // diagnostics for CI (kept in /tmp/rd-gap-* when a check fails): what the page renders vs. what the capture encodes
+  await shop.screenshot({ path: path.join(out, 'shop-before-arm.png') });
+  console.log('page renders', hueOf(path.join(out, 'shop-before-arm.png')));
   await rd((id) => self.__rd.armTab(id), await activeTabId());
+  await sleep(3000);
+  writeFileSync(path.join(out, 'health-after-arm.json'), JSON.stringify(await health(), null, 1));
 
   // ---- Instant Replay: 8 s on the shop, 20 s on another tab, 5 s on the shop, save
-  await sleep(8000);
+  await sleep(5000);
   const away = await leaveFor(shop, 20000);
   ok('switching to another tab puts capture into Privacy Pause, coming back resumes it', away.paused && away.resumed);
   await sleep(5000);
@@ -157,6 +162,7 @@ try {
   await ctx.close().catch(() => undefined);
   server.close();
   rmProfile(userData);
-  if (process.env.KEEP_FRAMES) console.log('frames kept in', out); else rmSync(out, { recursive: true, force: true });
-  process.exit(rep.summary() ? 1 : 0);
+  const failed = rep.summary();
+  if (failed || process.env.KEEP_FRAMES) console.log('frames and diagnostics kept in', out); else rmSync(out, { recursive: true, force: true });
+  process.exit(failed ? 1 : 0);
 }
