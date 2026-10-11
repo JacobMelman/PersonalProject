@@ -217,7 +217,7 @@ async function loadSamples(removeOne) {
     let id = `${Math.round(T(s.startWall))}-smp${rid()}`, buf = await (await fetch(base() + s.file)).arrayBuffer(), chunks = decodeSegment(buf).map((c) => ({ ...c, timestampUs: c.timestampUs + delta * 1e3 })), blob = encodeSegment(chunks);
     await opfsWrite(segPath(id), blob);
     let { file: _f, ...meta2 } = s;
-    segs.push({ ...meta2, id, startWall: T(s.startWall), endWall: T(s.endWall), bytes: blob.size, refs: s.refs.map((r) => sid.get(r)).filter((r) => !!r) });
+    segs.push({ ...meta2, id, startWall: T(s.startWall), endWall: T(s.endWall), pausedFrom: s.pausedFrom != null ? T(s.pausedFrom) : void 0, bytes: blob.size, refs: s.refs.map((r) => sid.get(r)).filter((r) => !!r) });
   }
   await dbPutMany("segments", segs);
   let shots = [];

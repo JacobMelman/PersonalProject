@@ -455,7 +455,7 @@ async function onTransition(prev, next, e) {
   if (next.mode !== "inactive" && !next.terminal)
     for (let [key, label, note] of OVERLAY_LABELS)
       prev[key] !== next[key] && await systemEvent(next[key] ? `${label} start` : `${label} end`, next[key] ? note : void 0, next.sessionId ?? void 0);
-  collecting(prev) !== collecting(next) && !next.terminal && await sendOff({ kind: "off", op: collecting(next) ? "resume" : "pause" }), !prev.terminal && next.terminal && await handleTerminal(prev, next, e);
+  collecting(prev) !== collecting(next) && !next.terminal && await sendOff(collecting(next) ? { kind: "off", op: "resume" } : { kind: "off", op: "pause", reason: next.privacy ? "privacy" : next.manual ? "manual" : next.afk ? "afk" : void 0 }), !prev.terminal && next.terminal && await handleTerminal(prev, next, e);
 }
 async function handleTerminal(prev, next, e) {
   let reason = e.type === "TARGET_ENDED" || e.type === "ERROR" ? e.reason ?? "" : "", settings = await getSettings(), last = (await dbGet("journal", "health"))?.lastChunkAt ?? Date.now();

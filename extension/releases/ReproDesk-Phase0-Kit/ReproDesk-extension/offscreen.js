@@ -140,6 +140,9 @@ var GOP_MS = 2e3, CODEC_CANDIDATES = ["vp09.00.10.08", "vp8"], RingRecorder = cl
   /** The newest frame of the approved tab. Tab capture is damage-driven: no new frame means nothing on screen changed. */
   latest = null;
   shotWaiters = [];
+  /** Start of a pause that no stored segment has recorded yet: written onto the first segment after it, so the replay can collapse it. */
+  pauseFrom = null;
+  pauseReason;
   setSettings(s) {
     this.settings = s;
   }
@@ -274,7 +277,7 @@ var GOP_MS = 2e3, CODEC_CANDIDATES = ["vp09.00.10.08", "vp8"], RingRecorder = cl
       height: this.height,
       refs: this.pinSession ? [this.pinSession] : []
     };
-    this.writeChain = this.writeChain.then(async () => {
+    this.pauseFrom != null && !this.paused && meta.startWall >= this.pauseFrom && (meta.pausedFrom = this.pauseFrom, meta.pauseReason = this.pauseReason, this.pauseFrom = null, this.pauseReason = void 0), this.writeChain = this.writeChain.then(async () => {
       await commitSegment(meta, chunks), this.stats.segmentsWritten++;
       let b = chunks.reduce((a, c) => a + c.data.byteLength, 0);
       this.stats.bytesWritten += b, meta.refs.length || (this.ringBytes += b, this.ringSegments++);
@@ -292,8 +295,8 @@ var GOP_MS = 2e3, CODEC_CANDIDATES = ["vp09.00.10.08", "vp8"], RingRecorder = cl
   setPinSession(id) {
     this.pinSession = id;
   }
-  pause() {
-    this.paused || (this.paused = !0, this.latest?.close(), this.latest = null, this.flushNow());
+  pause(reason) {
+    this.paused || (this.paused = !0, this.pauseFrom == null && (this.pauseFrom = Date.now(), this.pauseReason = reason), this.latest?.close(), this.latest = null, this.flushNow());
   }
   resume() {
     this.paused = !1, this.forceKey = !0;
@@ -354,7 +357,7 @@ async function handle(op) {
     case "stop":
       return healthTimer && clearInterval(healthTimer), healthTimer = null, await recorder?.stop(), recorder = null, { ok: !0 };
     case "pause":
-      return recorder?.pause(), { ok: !0 };
+      return recorder?.pause(op.reason), { ok: !0 };
     case "resume":
       return recorder?.resume(), { ok: !0 };
     case "config":

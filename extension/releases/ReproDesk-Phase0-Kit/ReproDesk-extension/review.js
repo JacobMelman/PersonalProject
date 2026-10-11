@@ -3098,6 +3098,71 @@ async function segmentsOfSession(sessionId2) {
   return (await listSegments()).filter((s) => s.refs.includes(sessionId2)).sort((a, b) => a.startWall - b.startWall);
 }
 
+// src/shared/video-clock.ts
+function buildClock(run) {
+  let startWall = run[0]?.startWall ?? 0, pauses = [], removed = 0, prevEnd = startWall;
+  for (let s of run) {
+    if (s.pausedFrom != null) {
+      let from = Math.max(prevEnd, s.pausedFrom), to = s.startWall;
+      to - from > 2e3 && (pauses.push({ fromWall: from, toWall: to, atMs: from - startWall - removed, holdMs: 1500, reason: s.pauseReason }), removed += to - from - 1500);
+    }
+    prevEnd = Math.max(prevEnd, s.endWall);
+  }
+  return { startWall, pauses };
+}
+function wallToVideoMs(c, wall) {
+  let removed = 0;
+  for (let p of c.pauses) {
+    if (wall >= p.toWall) {
+      removed += p.toWall - p.fromWall - p.holdMs;
+      continue;
+    }
+    if (wall > p.fromWall) return p.atMs + (wall - p.fromWall) / (p.toWall - p.fromWall) * p.holdMs;
+    break;
+  }
+  return wall - c.startWall - removed;
+}
+function videoMsToWall(c, ms) {
+  let removed = 0;
+  for (let p of c.pauses) {
+    if (ms >= p.atMs + p.holdMs) {
+      removed += p.toWall - p.fromWall - p.holdMs;
+      continue;
+    }
+    if (ms > p.atMs) return p.fromWall + (ms - p.atMs) / p.holdMs * (p.toWall - p.fromWall);
+    break;
+  }
+  return c.startWall + ms + removed;
+}
+function pauseLabel(reason) {
+  return reason === "privacy" ? "Privacy Pause" : reason === "manual" ? "Paused" : reason === "afk" ? "Away (AFK)" : "Capture paused";
+}
+
+// src/report/pause-card.ts
+function drawPauseCard(ctx, w, h, p) {
+  ctx.fillStyle = "#0E1A2B", ctx.fillRect(0, 0, w, h);
+  let s = Math.max(12, Math.round(h / 20));
+  ctx.textAlign = "center", ctx.textBaseline = "middle", ctx.fillStyle = "#FBFBFD", ctx.font = `700 ${Math.round(s * 1.4)}px Inter, Arial, sans-serif`, ctx.fillText(`${pauseLabel(p.reason)} \xB7 not recorded`, w / 2, h / 2 - s), ctx.fillStyle = "#A6B6CA", ctx.font = `400 ${s}px Inter, Arial, sans-serif`, ctx.fillText(`${formatClock(p.toWall - p.fromWall)} skipped`, w / 2, h / 2 + s);
+}
+async function encodePauseCard(codec, w, h, p) {
+  try {
+    let canvas = new OffscreenCanvas(w, h);
+    drawPauseCard(canvas.getContext("2d"), w, h, p);
+    let data = null, enc = new VideoEncoder({
+      output: (chunk) => {
+        data = new Uint8Array(chunk.byteLength), chunk.copyTo(data);
+      },
+      error: () => {
+      }
+    });
+    enc.configure({ codec, width: w, height: h, bitrate: 4e5, framerate: 10 });
+    let frame = new VideoFrame(canvas, { timestamp: 0 });
+    return enc.encode(frame, { keyFrame: !0 }), frame.close(), await enc.flush(), enc.close(), data;
+  } catch {
+    return null;
+  }
+}
+
 // src/report/video.ts
 function latestRun(segs) {
   if (!segs.length) return [];
@@ -3115,13 +3180,15 @@ async function selectRun(sessionId2, fromWall = 0) {
 async function muxSessionVideo(sessionId2, fromWall = 0) {
   let run = await selectRun(sessionId2, fromWall);
   if (!run.length) return null;
-  let first = run[0], baseUs = first.startWall * 1e3, output = new Output({ format: new WebMOutputFormat(), target: new BufferTarget() }), codec = first.codec.startsWith("vp09") ? "vp9" : "vp8", source = new EncodedVideoPacketSource(codec);
+  let first = run[0], clock = buildClock(run), output = new Output({ format: new WebMOutputFormat(), target: new BufferTarget() }), codec = first.codec.startsWith("vp09") ? "vp9" : "vp8", source = new EncodedVideoPacketSource(codec);
   output.addVideoTrack(source), await output.start();
   let sentConfig = !1, gaps = [], prevEnd = first.startWall, lastEnd = first.endWall;
   for (let seg of run) {
     seg.startWall - prevEnd > 1500 && gaps.push({ fromWall: prevEnd, toWall: seg.startWall }), prevEnd = seg.endWall, lastEnd = seg.endWall;
+    let pause = clock.pauses.find((p) => p.toWall === seg.startWall), card = pause && sentConfig ? await encodePauseCard(first.codec, first.width, first.height, pause) : null;
+    pause && card && await source.add(new EncodedPacket(card, "key", pause.atMs / 1e3, pause.holdMs / 1e3));
     for (let c of await readSegment(seg.id)) {
-      let packet = new EncodedPacket(c.data.slice(), c.key ? "key" : "delta", (c.timestampUs - baseUs) / 1e6, Math.max(c.durationUs, 1) / 1e6);
+      let packet = new EncodedPacket(c.data.slice(), c.key ? "key" : "delta", wallToVideoMs(clock, c.timestampUs / 1e3) / 1e3, Math.max(c.durationUs, 1) / 1e6);
       await source.add(packet, sentConfig ? void 0 : { decoderConfig: { codec: first.codec, codedWidth: first.width, codedHeight: first.height } }), sentConfig = !0;
     }
   }
@@ -3131,12 +3198,13 @@ async function muxSessionVideo(sessionId2, fromWall = 0) {
     blob: new Blob([buf], { type: "video/webm" }),
     startWall: first.startWall,
     endWall: lastEnd,
-    durationMs: lastEnd - first.startWall,
+    durationMs: wallToVideoMs(clock, lastEnd),
     codec: first.codec,
     width: first.width,
     height: first.height,
     segments: run.length,
-    gaps
+    gaps,
+    clock
   };
 }
 
@@ -3171,7 +3239,7 @@ var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function renderEditedVideo(sessionId2, edits, opts = {}) {
   let run = await selectRun(sessionId2, opts.fromWall ?? 0);
   if (!run.length) return null;
-  let first = run[0], W = first.width, H = first.height, baseUs = first.startWall * 1e3, cuts = normalizeCuts(edits.cuts), canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext("2d", { willReadFrequently: !1 }), cfg = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1e3, framerate: opts.fps ?? 15, latencyMode: "quality", bitrateMode: "variable" };
+  let first = run[0], W = first.width, H = first.height, clock = buildClock(run), nextPause = 0, cuts = normalizeCuts(edits.cuts), canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext("2d", { willReadFrequently: !1 }), cfg = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1e3, framerate: opts.fps ?? 15, latencyMode: "quality", bitrateMode: "variable" };
   if (!(await VideoEncoder.isConfigSupported(cfg)).supported) throw new Error(`The browser cannot encode ${first.codec}`);
   let packets = [], frames = 0, lastKeyMs = -1e9, lastOutMs = -1e9, endMs = 0, fatal = null, encoder = new VideoEncoder({
     output: (chunk, meta) => {
@@ -3183,9 +3251,17 @@ async function renderEditedVideo(sessionId2, edits, opts = {}) {
     }
   });
   encoder.configure(cfg);
-  let decoder = new VideoDecoder({
+  let emit = (outMs, durUs) => {
+    let key = outMs - lastKeyMs >= 2e3 || outMs - lastOutMs > 1500 || frames === 0;
+    key && (lastKeyMs = outMs);
+    let vf = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1e3), duration: durUs });
+    encoder.encode(vf, { keyFrame: key }), vf.close(), lastOutMs = outMs, endMs = outMs + durUs / 1e3, frames++;
+  }, card = (p) => {
+    inCut(p.atMs, cuts) || (drawPauseCard(ctx, W, H, p), emit(afterCuts(p.atMs, cuts), p.holdMs * 1e3));
+  }, decoder = new VideoDecoder({
     output: (frame) => {
-      let relMs = (frame.timestamp - baseUs) / 1e3;
+      let relMs = wallToVideoMs(clock, frame.timestamp / 1e3);
+      for (; nextPause < clock.pauses.length && relMs >= clock.pauses[nextPause].atMs + clock.pauses[nextPause].holdMs; ) card(clock.pauses[nextPause++]);
       if (inCut(relMs, cuts)) {
         frame.close();
         return;
@@ -3197,10 +3273,7 @@ async function renderEditedVideo(sessionId2, edits, opts = {}) {
         let x3 = Math.min(m.x1, m.x2) * W, y = Math.min(m.y1, m.y2) * H, w = Math.abs(m.x2 - m.x1) * W, h = Math.abs(m.y2 - m.y1) * H;
         m.type === "redact" ? (ctx.fillStyle = "#000", ctx.fillRect(x3, y, w, h)) : mosaic(ctx, canvas, x3, y, w, h);
       }
-      let outMs = afterCuts(relMs, cuts), key = outMs - lastKeyMs >= 2e3 || outMs - lastOutMs > 1500 || frames === 0;
-      key && (lastKeyMs = outMs);
-      let vf = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1e3), duration: dur2 });
-      encoder.encode(vf, { keyFrame: key }), vf.close(), lastOutMs = outMs, endMs = outMs + dur2 / 1e3, frames++;
+      emit(afterCuts(relMs, cuts), dur2);
     },
     error: (e) => {
       fatal = new Error(`Decoder: ${e.message}`);
@@ -21462,7 +21535,7 @@ async function buildEvidencePackage(inp) {
     end: session.endedAt ? new Date(session.endedAt).toISOString() : null,
     last_committed: session.lastCommittedAt ? new Date(session.lastCommittedAt).toISOString() : null,
     pre_session_context: session.preContext ? { present: !0, kept: inp.keepPre, seconds: Math.round((session.preContext.endWall - session.preContext.startWall) / 1e3) } : { present: !1 },
-    video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : !1 } : null,
+    video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, pauses_not_recorded: video.clock.pauses.map((p) => ({ from_wall_ms: p.fromWall, to_wall_ms: p.toWall, reason: p.reason ?? null, shown_at_ms: Math.round(p.atMs), shown_for_ms: p.holdMs })), redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : !1 } : null,
     screenshots: shots.map((sh) => ({ id: sh.id, annotated: (sh.annotations?.length ?? 0) > 0, redacted: hasRedaction(sh.annotations), original_included: Object.keys(inp.extraFiles ?? {}).some((k) => k.startsWith("screenshots/originals/") && k.includes(sh.id)) })),
     notes: "sha256 values are integrity metadata only, not a claim of forensic chain-of-custody. Redacted screenshots are exported flattened; originals are included only when the exporter asked for them.",
     artifacts
@@ -23362,13 +23435,13 @@ Video and screenshots can show sensitive values that were visible in the tested 
     tl?.addEventListener("click", (e) => {
       let row = e.target.closest("[data-i]");
       if (!row || !vid || !video) return;
-      let ms = events[Number(row.dataset.i)].ts - video.startWall;
+      let ms = wallToVideoMs(video.clock, events[Number(row.dataset.i)].ts);
       vid.currentTime = Math.max(0, (previewing ? afterCuts(ms, normalizeCuts(edits.cuts)) : ms) / 1e3);
     });
     let lastIdx = -1;
     vid?.addEventListener("timeupdate", () => {
       if (!video) return;
-      let wall = video.startWall + vid.currentTime * 1e3, idx = -1;
+      let wall = videoMsToWall(video.clock, vid.currentTime * 1e3), idx = -1;
       for (let i2 = 0; i2 < events.length; i2++) events[i2].ts <= wall && (idx = i2);
       if (idx === lastIdx) return;
       lastIdx = idx, tl?.querySelectorAll(".tl.now").forEach((n3) => n3.classList.remove("now"));
@@ -23420,7 +23493,7 @@ Video and screenshots can show sensitive values that were visible in the tested 
       copy("txt");
     }), document.getElementById("export")?.addEventListener("click", async () => {
       if (!confirmExport()) return;
-      let cutsN = normalizeCuts(edits.cuts), edited = hasEdits(edits) && !!video, keptEvents = edited && video ? ev.events.filter((e) => !inCut(e.ts - video.startWall, cutsN)) : ev.events, keptShots = edited && video ? ev.shots.filter((s2) => !inCut(s2.ts - video.startWall, cutsN)) : ev.shots, exportVideo = video, exportVideoBytes;
+      let cutsN = normalizeCuts(edits.cuts), edited = hasEdits(edits) && !!video, keptEvents = edited && video ? ev.events.filter((e) => !inCut(wallToVideoMs(video.clock, e.ts), cutsN)) : ev.events, keptShots = edited && video ? ev.shots.filter((s2) => !inCut(wallToVideoMs(video.clock, s2.ts), cutsN)) : ev.shots, exportVideo = video, exportVideoBytes;
       if (edited && video && document.querySelector('[data-fmt="zip"]')?.checked) {
         setStatus([`<div class="r">${icon("refresh-cw")}<span id="ex-prog">Rendering the redacted video\u2026 0%</span></div>`]);
         try {
