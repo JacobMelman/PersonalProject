@@ -3142,7 +3142,7 @@ function pauseLabel(reason) {
 function drawPauseCard(ctx, w, h, p) {
   ctx.fillStyle = "#0E1A2B", ctx.fillRect(0, 0, w, h);
   let s = Math.max(12, Math.round(h / 20));
-  ctx.textAlign = "center", ctx.textBaseline = "middle", ctx.fillStyle = "#FBFBFD", ctx.font = `700 ${Math.round(s * 1.4)}px Inter, Arial, sans-serif`, ctx.fillText(`${pauseLabel(p.reason)} \xB7 not recorded`, w / 2, h / 2 - s), ctx.fillStyle = "#A6B6CA", ctx.font = `400 ${s}px Inter, Arial, sans-serif`, ctx.fillText(`${formatClock(p.toWall - p.fromWall)} skipped`, w / 2, h / 2 + s);
+  ctx.textAlign = "center", ctx.textBaseline = "middle", ctx.fillStyle = "#FBFBFD", ctx.font = `700 ${Math.round(s * 1.4)}px Inter, Arial, sans-serif`, ctx.fillText(`${pauseLabel(p.reason)} \xB7 not recorded`, w / 2, h / 2);
 }
 async function encodePauseCard(codec, w, h, p) {
   try {

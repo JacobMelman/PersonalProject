@@ -1,5 +1,5 @@
 // The "not recorded" card a replay shows in place of a capture pause (see shared/video-clock.ts).
-import { formatClock } from '../shared/filename';
+// It says what happened, not for how long: how long someone was away from the tab is nobody's business.
 import { pauseLabel, type VideoPause } from '../shared/video-clock';
 
 export function drawPauseCard(ctx: OffscreenCanvasRenderingContext2D, w: number, h: number, p: VideoPause): void {
@@ -10,10 +10,7 @@ export function drawPauseCard(ctx: OffscreenCanvasRenderingContext2D, w: number,
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#FBFBFD';
   ctx.font = `700 ${Math.round(s * 1.4)}px Inter, Arial, sans-serif`;
-  ctx.fillText(`${pauseLabel(p.reason)} · not recorded`, w / 2, h / 2 - s);
-  ctx.fillStyle = '#A6B6CA';
-  ctx.font = `400 ${s}px Inter, Arial, sans-serif`;
-  ctx.fillText(`${formatClock(p.toWall - p.fromWall)} skipped`, w / 2, h / 2 + s);
+  ctx.fillText(`${pauseLabel(p.reason)} · not recorded`, w / 2, h / 2);
 }
 
 /** One key frame of the card, encoded with the replay's own codec and size so it can sit between its packets. */
