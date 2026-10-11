@@ -38,7 +38,7 @@ async function handle(op: OffscreenOp): Promise<unknown> {
       recorder = null;
       return { ok: true };
     case 'pause':
-      recorder?.pause();
+      recorder?.pause(op.reason);
       return { ok: true };
     case 'resume':
       recorder?.resume();

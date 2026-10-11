@@ -1,6 +1,7 @@
 import { loadEvidence, saveReport, type LoadedEvidence } from '../report/evidence';
 import { buildReportModel, SESSION_TYPE, type ReportModel } from '../report/model';
 import { muxSessionVideo, type MuxedVideo } from '../report/video';
+import { videoMsToWall, wallToVideoMs } from '../shared/video-clock';
 import { renderEditedVideo } from '../report/video-redact';
 import { activeMasks, afterCuts, editId, hasEdits, inCut, normalizeCuts, sanitizeEdits, type VideoEdits } from '../shared/video-edits';
 import { renderHtml } from '../report/render-html';
@@ -331,14 +332,14 @@ async function detail(id: string): Promise<void> {
     tl?.addEventListener('click', (e) => {
       const row = (e.target as HTMLElement).closest('[data-i]') as HTMLElement | null;
       if (!row || !vid || !video) return;
-      const ms = events[Number(row.dataset.i)].ts - video.startWall;
+      const ms = wallToVideoMs(video.clock, events[Number(row.dataset.i)].ts);
       vid.currentTime = Math.max(0, (previewing ? afterCuts(ms, normalizeCuts(edits.cuts)) : ms) / 1000);
     });
     // live highlight: the timeline follows the video
     let lastIdx = -1;
     vid?.addEventListener('timeupdate', () => {
       if (!video) return;
-      const wall = video.startWall + vid.currentTime * 1000;
+      const wall = videoMsToWall(video.clock, vid.currentTime * 1000);
       let idx = -1;
       for (let i = 0; i < events.length; i++) if (events[i].ts <= wall) idx = i;
       if (idx === lastIdx) return;
@@ -438,8 +439,8 @@ async function detail(id: string): Promise<void> {
       // Privacy edits: frames/events/screenshots inside cut ranges never reach any export; masks are burned into the re-encoded video.
       const cutsN = normalizeCuts(edits.cuts);
       const edited = hasEdits(edits) && !!video;
-      const keptEvents = edited && video ? ev.events.filter((e) => !inCut(e.ts - video!.startWall, cutsN)) : ev.events;
-      const keptShots = edited && video ? ev.shots.filter((s2) => !inCut(s2.ts - video!.startWall, cutsN)) : ev.shots;
+      const keptEvents = edited && video ? ev.events.filter((e) => !inCut(wallToVideoMs(video!.clock, e.ts), cutsN)) : ev.events;
+      const keptShots = edited && video ? ev.shots.filter((s2) => !inCut(wallToVideoMs(video!.clock, s2.ts), cutsN)) : ev.shots;
       let exportVideo: MuxedVideo | null = video;
       let exportVideoBytes: Uint8Array | undefined;
       if (edited && video && (document.querySelector('[data-fmt="zip"]') as HTMLInputElement | null)?.checked) {

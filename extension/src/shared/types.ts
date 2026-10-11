@@ -77,7 +77,12 @@ export interface SegmentMeta {
   height: number;
   /** Session ids that pin this segment. Empty = temporary ring data. */
   refs: string[];
+  /** Set on the first segment recorded after a capture pause: when the pause began (wall ms) and why. Nothing was recorded in between. */
+  pausedFrom?: number;
+  pauseReason?: PauseReason;
 }
+
+export type PauseReason = 'privacy' | 'manual' | 'afk';
 
 export type SessionKind = 'instant' | 'repro' | 'screenshot';
 export type SessionStatus = 'active' | 'finished' | 'target_ended' | 'recovered';

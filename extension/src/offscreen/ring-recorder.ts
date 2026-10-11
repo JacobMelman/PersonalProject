@@ -1,6 +1,6 @@
 // Tab video -> WebCodecs encoder -> GOP segments stored in OPFS (+ IDB index). Bounded memory: only the current GOP is kept in RAM.
 import { commitSegment, cleanupRing, type StoredChunk } from '../storage/segments';
-import type { HealthSnapshot, SegmentMeta, Settings } from '../shared/types';
+import type { HealthSnapshot, PauseReason, SegmentMeta, Settings } from '../shared/types';
 import { opfsWrite } from '../storage/opfs';
 
 interface MSTProcessor {
@@ -40,6 +40,9 @@ export class RingRecorder {
   /** The newest frame of the approved tab. Tab capture is damage-driven: no new frame means nothing on screen changed. */
   private latest: VideoFrame | null = null;
   private shotWaiters: Array<(b: ImageBitmap | null) => void> = [];
+  /** Start of a pause that no stored segment has recorded yet: written onto the first segment after it, so the replay can collapse it. */
+  private pauseFrom: number | null = null;
+  private pauseReason: PauseReason | undefined;
 
   constructor(settings: Settings, private cb: RecorderCallbacks) {
     this.settings = settings;
@@ -228,6 +231,12 @@ export class RingRecorder {
       height: this.height,
       refs: this.pinSession ? [this.pinSession] : [],
     };
+    if (this.pauseFrom != null && !this.paused && meta.startWall >= this.pauseFrom) {
+      meta.pausedFrom = this.pauseFrom;
+      meta.pauseReason = this.pauseReason;
+      this.pauseFrom = null;
+      this.pauseReason = undefined;
+    }
     this.writeChain = this.writeChain
       .then(async () => {
         await commitSegment(meta, chunks);
@@ -260,9 +269,13 @@ export class RingRecorder {
     this.pinSession = id;
   }
 
-  pause(): void {
+  pause(reason?: PauseReason): void {
     if (this.paused) return;
     this.paused = true;
+    if (this.pauseFrom == null) {
+      this.pauseFrom = Date.now();
+      this.pauseReason = reason;
+    }
     // A frame from before the pause must never stand in for the screen after it.
     this.latest?.close();
     this.latest = null;

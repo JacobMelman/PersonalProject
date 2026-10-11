@@ -5,6 +5,8 @@ import { readSegment } from '../storage/segments';
 import { selectRun } from './video';
 import { mosaic } from '../ui/annotate-render';
 import { activeMasks, afterCuts, inCut, normalizeCuts, type VideoEdits } from '../shared/video-edits';
+import { buildClock, wallToVideoMs, type VideoPause } from '../shared/video-clock';
+import { drawPauseCard } from './pause-card';
 
 export interface EditedVideo {
   blob: Blob;
@@ -26,7 +28,8 @@ export async function renderEditedVideo(
   if (!run.length) return null;
   const first = run[0];
   const W = first.width, H = first.height;
-  const baseUs = first.startWall * 1000;
+  const clock = buildClock(run); // same time base as the player: pauses are collapsed to a card
+  let nextPause = 0;
   const cuts = normalizeCuts(edits.cuts);
   const canvas = new OffscreenCanvas(W, H);
   const ctx = canvas.getContext('2d', { willReadFrequently: false })!;
@@ -46,9 +49,26 @@ export async function renderEditedVideo(
   });
   encoder.configure(cfg);
 
+  const emit = (outMs: number, durUs: number) => {
+    const key = outMs - lastKeyMs >= 2000 || outMs - lastOutMs > 1500 || frames === 0;
+    if (key) lastKeyMs = outMs;
+    const vf = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1000), duration: durUs });
+    encoder.encode(vf, { keyFrame: key });
+    vf.close();
+    lastOutMs = outMs;
+    endMs = outMs + durUs / 1000;
+    frames++;
+  };
+  const card = (p: VideoPause) => {
+    if (inCut(p.atMs, cuts)) return;
+    drawPauseCard(ctx, W, H, p);
+    emit(afterCuts(p.atMs, cuts), p.holdMs * 1000);
+  };
+
   const decoder = new VideoDecoder({
     output: (frame) => {
-      const relMs = (frame.timestamp - baseUs) / 1000;
+      const relMs = wallToVideoMs(clock, frame.timestamp / 1000);
+      while (nextPause < clock.pauses.length && relMs >= clock.pauses[nextPause].atMs + clock.pauses[nextPause].holdMs) card(clock.pauses[nextPause++]);
       if (inCut(relMs, cuts)) { frame.close(); return; }
       ctx.drawImage(frame, 0, 0, W, H);
       const dur = frame.duration ?? 66_000;
@@ -57,15 +77,7 @@ export async function renderEditedVideo(
         const x = Math.min(m.x1, m.x2) * W, y = Math.min(m.y1, m.y2) * H, w = Math.abs(m.x2 - m.x1) * W, h = Math.abs(m.y2 - m.y1) * H;
         if (m.type === 'redact') { ctx.fillStyle = '#000'; ctx.fillRect(x, y, w, h); } else mosaic(ctx, canvas, x, y, w, h);
       }
-      const outMs = afterCuts(relMs, cuts);
-      const key = outMs - lastKeyMs >= 2000 || outMs - lastOutMs > 1500 || frames === 0;
-      if (key) lastKeyMs = outMs;
-      const vf = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1000), duration: dur });
-      encoder.encode(vf, { keyFrame: key });
-      vf.close();
-      lastOutMs = outMs;
-      endMs = outMs + dur / 1000;
-      frames++;
+      emit(afterCuts(relMs, cuts), dur);
     },
     error: (e) => { fatal = new Error(`Decoder: ${e.message}`); },
   });

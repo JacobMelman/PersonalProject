@@ -47,7 +47,7 @@ export async function loadSamples(removeOne: (id: string) => Promise<void>): Pro
     await opfsWrite(segPath(id), blob);
     const { file: _f, ...meta } = s;
     void _f;
-    segs.push({ ...meta, id, startWall: T(s.startWall)!, endWall: T(s.endWall)!, bytes: blob.size, refs: s.refs.map((r) => sid.get(r)).filter((r): r is string => !!r) });
+    segs.push({ ...meta, id, startWall: T(s.startWall)!, endWall: T(s.endWall)!, pausedFrom: s.pausedFrom != null ? T(s.pausedFrom)! : undefined, bytes: blob.size, refs: s.refs.map((r) => sid.get(r)).filter((r): r is string => !!r) });
   }
   await dbPutMany('segments', segs);
 

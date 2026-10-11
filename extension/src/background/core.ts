@@ -183,7 +183,8 @@ async function onTransition(prev: CaptureState, next: CaptureState, e: StateEven
     }
   }
   if (collecting(prev) !== collecting(next) && !next.terminal) {
-    await sendOff({ kind: 'off', op: collecting(next) ? 'resume' : 'pause' });
+    // the recorder marks the pause, so the replay can show it as "not recorded" instead of a frozen picture
+    await sendOff(collecting(next) ? { kind: 'off', op: 'resume' } : { kind: 'off', op: 'pause', reason: next.privacy ? 'privacy' : next.manual ? 'manual' : next.afk ? 'afk' : undefined });
   }
   if (!prev.terminal && next.terminal) await handleTerminal(prev, next, e);
 }

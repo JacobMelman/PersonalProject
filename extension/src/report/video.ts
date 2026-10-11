@@ -2,6 +2,8 @@
 import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, Output, WebMOutputFormat } from 'mediabunny';
 import { readSegment, segmentsOfSession } from '../storage/segments';
 import type { SegmentMeta } from '../shared/types';
+import { buildClock, wallToVideoMs, type VideoClock } from '../shared/video-clock';
+import { encodePauseCard } from './pause-card';
 
 export interface MuxedVideo {
   blob: Blob;
@@ -13,6 +15,8 @@ export interface MuxedVideo {
   height: number;
   segments: number;
   gaps: Array<{ fromWall: number; toWall: number }>;
+  /** Maps wall-clock time to video time; capture pauses are collapsed to a short "not recorded" card. */
+  clock: VideoClock;
 }
 
 /** Latest contiguous run of segments sharing one encoder configuration (a resize changes the track and cannot be muxed in place). */
@@ -37,7 +41,7 @@ export async function muxSessionVideo(sessionId: string, fromWall = 0): Promise<
   const run = await selectRun(sessionId, fromWall);
   if (!run.length) return null;
   const first = run[0];
-  const baseUs = first.startWall * 1000;
+  const clock = buildClock(run);
   const output = new Output({ format: new WebMOutputFormat(), target: new BufferTarget() });
   const codec = first.codec.startsWith('vp09') ? 'vp9' : 'vp8';
   const source = new EncodedVideoPacketSource(codec);
@@ -51,8 +55,11 @@ export async function muxSessionVideo(sessionId: string, fromWall = 0): Promise<
     if (seg.startWall - prevEnd > 1500) gaps.push({ fromWall: prevEnd, toWall: seg.startWall });
     prevEnd = seg.endWall;
     lastEnd = seg.endWall;
+    const pause = clock.pauses.find((p) => p.toWall === seg.startWall);
+    const card = pause && sentConfig ? await encodePauseCard(first.codec, first.width, first.height, pause) : null;
+    if (pause && card) await source.add(new EncodedPacket(card, 'key', pause.atMs / 1000, pause.holdMs / 1000));
     for (const c of await readSegment(seg.id)) {
-      const packet = new EncodedPacket(c.data.slice(), c.key ? 'key' : 'delta', (c.timestampUs - baseUs) / 1e6, Math.max(c.durationUs, 1) / 1e6);
+      const packet = new EncodedPacket(c.data.slice(), c.key ? 'key' : 'delta', wallToVideoMs(clock, c.timestampUs / 1000) / 1000, Math.max(c.durationUs, 1) / 1e6);
       await source.add(packet, sentConfig ? undefined : { decoderConfig: { codec: first.codec, codedWidth: first.width, codedHeight: first.height } });
       sentConfig = true;
     }
@@ -63,11 +70,12 @@ export async function muxSessionVideo(sessionId: string, fromWall = 0): Promise<
     blob: new Blob([buf], { type: 'video/webm' }),
     startWall: first.startWall,
     endWall: lastEnd,
-    durationMs: lastEnd - first.startWall,
+    durationMs: wallToVideoMs(clock, lastEnd),
     codec: first.codec,
     width: first.width,
     height: first.height,
     segments: run.length,
     gaps,
+    clock,
   };
 }

@@ -1,4 +1,4 @@
-import type { Settings, TimelineEvent } from './types';
+import type { PauseReason, Settings, TimelineEvent } from './types';
 
 export type Command =
   | 'saveReplay'
@@ -25,7 +25,7 @@ export interface CommandMessage {
 export type OffscreenOp =
   | { kind: 'off'; op: 'start'; streamId: string; settings: Settings; size?: { width: number; height: number } }
   | { kind: 'off'; op: 'stop' }
-  | { kind: 'off'; op: 'pause' }
+  | { kind: 'off'; op: 'pause'; reason?: PauseReason }
   | { kind: 'off'; op: 'resume' }
   | { kind: 'off'; op: 'config'; settings: Settings }
   | { kind: 'off'; op: 'save-replay'; sessionId: string; triggerWall: number; preMs: number; tailMs: number }
