@@ -45,7 +45,8 @@ try {
   ok('clicks and navigation are recorded', evs.some((e) => e.type === 'click' && e.element?.label === 'Add to cart') && evs.some((e) => e.type === 'navigate' && e.path === '/cart'), `events=${evs.length}`);
   ok('no typed/editable values or key content persisted', !/Hunter2|SECRETPASSWORD|jane\.secret|TOPSECRETNOTE/.test(blob));
   ok('no query string or fragment persisted', !/SECRETQUERY|#frag|token=/.test(blob));
-  ok('PII-looking text is redacted from labels', !/jane\.doe@bank|4111/.test(blob));
+  // the card number as written on the page (or fully joined): a bare "4111" also matches millisecond timestamps (CI run 18 failed on 1791743741110)
+  ok('PII-looking text is redacted from labels', !/jane\.doe@bank|4111[\s-]+1111|4111111111111111/.test(blob));
   ok('events carry origin+path only (no editable element text)', evs.filter((e) => e.element && ['textbox'].includes(e.element.role)).every((e) => e.element.label === null || e.element.label.length < 30));
 
   // ------------------------------------------------------------------ Save Last Replay + playback (B0.2/B0.4/B0.9)
