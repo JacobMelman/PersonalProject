@@ -33,6 +33,19 @@ describe('report model', () => {
     const steps = draftSteps(events, T0);
     expect(steps.map((s) => s.text)).toEqual(['Click button "Save" on /customer', 'Navigate to /cart']);
   });
+  it('a renamed step uses the reporter\'s words and keeps the observed action next to it', () => {
+    const [first] = draftSteps(events, T0);
+    const steps = draftSteps(events, T0, { [first.key]: '  Save the   customer\n record ' });
+    expect(steps[0]).toMatchObject({ text: 'Save the customer record', observed: 'Click button "Save" on /customer', renamed: true });
+    expect(steps[1]).toMatchObject({ text: 'Navigate to /cart', renamed: false });
+    expect(draftSteps(events, T0, { [first.key]: '   ' })[0]).toMatchObject({ text: first.observed, renamed: false }); // blank = observed
+    expect(draftSteps(events, T0, { [first.key]: 'x'.repeat(1000) })[0].text).toHaveLength(300);
+  });
+  it('step keys are stable (action + time), so a rename survives rebuilding the steps', () => {
+    expect(draftSteps(events, T0).map((s) => s.key)).toEqual(draftSteps([...events].reverse(), T0).map((s) => s.key));
+    const m = buildReportModel({ session, events, shots: [], report: { ...report, stepTexts: { [draftSteps(events, T0)[1].key]: 'Open the cart' } }, videoInfo: null, keepPre: true });
+    expect(m.steps.map((s) => s.text)).toEqual(['Click button "Save" on /customer', 'Open the cart']);
+  });
   it('pre-session context is flagged separately and never becomes steps by default', () => {
     expect(build(true).preSession).toEqual({ present: true, kept: true, seconds: 30 });
     expect(build(true).steps.some((s) => /Pre-session/.test(s.text))).toBe(false);
@@ -64,6 +77,13 @@ describe('renderers', () => {
       expect(out).toContain('Saved');
       expect(out).toContain('Nothing happens');
     }
+  });
+  it('a renamed step keeps the observed action next to it in every text format (escaped in HTML)', () => {
+    const renamed = buildReportModel({ session, events, shots: [], report: { ...report, stepTexts: { [draftSteps(events, T0)[0].key]: 'Save the <b>form</b>' } }, videoInfo: null, keepPre: true });
+    expect(renderTxt(renamed)).toMatch(/^ 1\. \[[^\]]+\] Save the <b>form<\/b>\n {4}observed: Click button "Save" on \/customer$/m);
+    expect(renderMarkdown(renamed)).toContain('Save the <b>form</b> (observed: Click button "Save" on /customer)');
+    expect(renderHtml(renamed, 'inline')).toContain('Save the &lt;b&gt;form&lt;/b&gt;<small class="obs">observed: Click button &quot;Save&quot; on /customer</small>');
+    expect(renderTxt(m)).not.toContain('observed:');
   });
   it('TXT never silently drops screenshots', () => {
     const withShot = { ...m, screenshots: [{ id: 'a', ts: T0, rel: '00:01', label: 'Screenshot 1', filename: 'screenshots/01_a.png', width: 1, height: 1 }] };

@@ -6,8 +6,19 @@ export interface Step {
   n: number;
   ts: number;
   rel: string;
+  /** What the report says: the reporter's wording if they renamed the step, else the observed action. */
   text: string;
+  /** Stable id of the step (its action and time), for keeping a rename when the steps are rebuilt. */
+  key: string;
+  /** The observed action as recorded. */
+  observed: string;
+  renamed: boolean;
 }
+
+/** Longest step name a reporter can give. */
+export const STEP_TEXT_MAX = 300;
+/** A rename as it is stored: one line, trimmed, bounded; empty means "back to the observed action". */
+export const cleanStepText = (t: string): string => t.replace(/\s+/g, ' ').trim().slice(0, STEP_TEXT_MAX);
 export interface Moment {
   ts: number;
   rel: string;
@@ -72,7 +83,7 @@ function eventText(e: TimelineEvent): string {
 }
 
 /** Deterministic draft Steps (REP-01): observed actions only, no AI, focus noise collapsed, Pre-session Context excluded (REP-04). */
-export function draftSteps(events: TimelineEvent[], from: number): Step[] {
+export function draftSteps(events: TimelineEvent[], from: number, names: Record<string, string> = {}): Step[] {
   const acts = events.filter((e) => e.ts >= from && ['click', 'navigate', 'submit', 'focus'].includes(e.type)).sort((a, b) => a.ts - b.ts);
   const kept: TimelineEvent[] = [];
   acts.forEach((e, i) => {
@@ -84,7 +95,12 @@ export function draftSteps(events: TimelineEvent[], from: number): Step[] {
     if (prev && prev.type === e.type && eventText(prev) === eventText(e) && e.ts - prev.ts < 400) return; // double-fire
     kept.push(e);
   });
-  return kept.map((e, i) => ({ n: i + 1, ts: e.ts, rel: formatClock(e.ts - from), text: eventText(e) }));
+  return kept.map((e, i) => {
+    const key = `${e.type}@${e.ts}`;
+    const observed = eventText(e);
+    const own = names[key] ? cleanStepText(names[key]) : '';
+    return { n: i + 1, ts: e.ts, rel: formatClock(e.ts - from), key, observed, text: own || observed, renamed: !!own };
+  });
 }
 
 export interface BuildInput {
@@ -119,7 +135,7 @@ export function buildReportModel(inp: BuildInput): ReportModel {
     durationMs: session.endedAt ? session.endedAt - t0 : null,
     status: session.status,
     endNote,
-    steps: draftSteps(visible, t0),
+    steps: draftSteps(visible, t0, report.stepTexts),
     preSession: { present: !!pre, kept: !!pre && keepPre, seconds: pre ? Math.round((pre.endWall - pre.startWall) / 1000) : 0 },
     expected: report.expected,
     actual: report.actual,

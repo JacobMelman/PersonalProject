@@ -35,6 +35,16 @@ try {
   const rv = await ctx.newPage();
   await rv.goto(`chrome-extension://${keyInfo.id}/review.html?session=${sess.id}`);
   await until(() => rv.evaluate(() => { const v = document.getElementById('vid'); return v && v.duration > 0; }), 15000);
+  // rename a step: inline, kept after a reload, used by every export (the observed action stays visible next to it)
+  const observed1 = (await rv.locator('#steps li >> nth=0').locator('.stx').innerText()).trim();
+  await rv.locator('#steps li >> nth=0').locator('[data-rename]').click();
+  await rv.locator('#steps li >> nth=0').locator('input').fill('Open the product page and add the item');
+  await rv.keyboard.press('Enter');
+  await until(() => rv.evaluate(() => /Open the product page/.test(document.querySelector('#steps li')?.textContent ?? '')), 5000);
+  await rv.reload();
+  await until(() => rv.evaluate(() => { const v = document.getElementById('vid'); return v && v.duration > 0; }), 15000);
+  const first = await rv.locator('#steps li >> nth=0').innerText();
+  ok('a renamed step is saved and shows the observed action under it', first.includes('Open the product page and add the item') && first.includes(observed1), first.replace(/\n/g, ' | '));
   await rv.fill('#f-title', 'Checkout button missing <script>alert(1)</script>');
   await rv.fill('#f-actual', 'Actual: button is not shown');
   await rv.fill('#f-exp', 'Expected: button is shown');
@@ -51,6 +61,12 @@ try {
     await d.saveAs(p);
     files[path.extname(p).slice(1)] = p;
   }
+  const txt1 = readFileSync(files.txt, 'utf8');
+  ok('the exports use the renamed step and keep the observed action under it', /^ ?1\. \[[^\]]+\] Open the product page and add the item\n {4}observed: /m.test(txt1) && txt1.includes(`observed: ${observed1}`) && readFileSync(files.html, 'utf8').includes('Open the product page and add the item'), txt1.split('\n').filter((l) => /^ ?1\. |observed:/.test(l)).join(' | '));
+  await rv.locator('#steps li >> nth=0').locator('[data-reset]').click();
+  await until(() => rv.evaluate((o) => document.querySelector('#steps li .stx')?.textContent?.trim() === o, observed1), 5000);
+  const reset = await rd(async (id) => { const db = await new Promise((res) => { const q = indexedDB.open('reprodesk'); q.onsuccess = () => res(q.result); }); return new Promise((res) => { const q = db.transaction('reports').objectStore('reports').getAll(); q.onsuccess = () => res(q.result.find((r) => r.sessionId === id)?.stepTexts ?? null); }); }, sess.id);
+  ok('"back to the observed action" removes the rename', reset && Object.keys(reset).length === 0, JSON.stringify(reset));
   const status = await rv.locator('#exstatus').innerText();
   ok('per-format status reports no failures', !/FAILED/.test(status), status.replace(/\n/g, ' | '));
 

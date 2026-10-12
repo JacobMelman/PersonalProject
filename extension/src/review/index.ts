@@ -1,5 +1,5 @@
 import { loadEvidence, saveReport, type LoadedEvidence } from '../report/evidence';
-import { buildReportModel, SESSION_TYPE, type ReportModel } from '../report/model';
+import { buildReportModel, cleanStepText, SESSION_TYPE, STEP_TEXT_MAX, type ReportModel, type Step } from '../report/model';
 import { muxSessionVideo, type MuxedVideo } from '../report/video';
 import { videoMsToWall, wallToVideoMs } from '../shared/video-clock';
 import { renderEditedVideo } from '../report/video-redact';
@@ -104,6 +104,51 @@ async function detail(id: string): Promise<void> {
   const shotUrls = ev.shots.map((s) => URL.createObjectURL(new Blob([s.data as BlobPart], { type: 'image/png' })));
   const visibleEvents = () => ev.events.filter((e) => keepPre || e.ts >= ev.session.startedAt).sort((a, b) => a.ts - b.ts);
 
+  // Steps: drafted from observed actions; the reporter can rename any of them (the timeline keeps what really happened).
+  const stepsHtml = (steps: Step[]) =>
+    steps.length
+      ? `<ol class="steps">${steps.slice(0, 40).map((st) => `<li data-step="${esc(st.key)}"><span class="stx">${esc(st.text)}${st.renamed ? `<span class="obs" title="Observed action">${icon('mouse-pointer-click')}${esc(st.observed)}</span>` : ''}</span><span class="rel">${st.rel}</span><span class="stbtns"><button class="iconbtn" data-rename aria-label="Rename step ${st.n}" title="Rename">${icon('pencil')}</button>${st.renamed ? `<button class="iconbtn" data-reset aria-label="Back to the observed action for step ${st.n}" title="Back to the observed action">${icon('rotate-ccw')}</button>` : ''}</span></li>`).join('')}</ol>`
+      : '<p class="muted small">No actions were recorded.</p>';
+  const setStepText = async (key: string, text: string) => {
+    const names = { ...(ev.report.stepTexts ?? {}) };
+    const step = model().steps.find((s) => s.key === key);
+    const clean = cleanStepText(text);
+    if (!clean || clean === step?.observed) delete names[key]; else names[key] = clean;
+    ev.report = { ...ev.report, stepTexts: names };
+    await saveReport(ev.report);
+    document.getElementById('steps')!.innerHTML = stepsHtml(model().steps);
+  };
+  const wireSteps = () => {
+    const box = document.getElementById('steps');
+    box?.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('button');
+      const li = (e.target as HTMLElement).closest('li[data-step]') as HTMLLIElement | null;
+      if (!btn || !li) return;
+      const key = li.dataset.step!;
+      if (btn.hasAttribute('data-reset')) return void setStepText(key, '');
+      if (!btn.hasAttribute('data-rename')) return;
+      const step = model().steps.find((s) => s.key === key);
+      if (!step) return;
+      const tx = li.querySelector('.stx')!;
+      tx.innerHTML = `<input class="input sm" type="text" maxlength="${STEP_TEXT_MAX}" aria-label="Step ${step.n} name" value="${esc(step.text)}">`;
+      const input = tx.querySelector('input')!;
+      input.focus();
+      input.select();
+      let done = false;
+      const finish = (save: boolean) => {
+        if (done) return;
+        done = true;
+        if (save) void setStepText(key, input.value);
+        else box.innerHTML = stepsHtml(model().steps);
+      };
+      input.addEventListener('keydown', (k) => {
+        if (k.key === 'Enter') { k.preventDefault(); finish(true); }
+        if (k.key === 'Escape') { k.preventDefault(); finish(false); }
+      });
+      input.addEventListener('blur', () => finish(true));
+    });
+  };
+
   const draw = () => {
     const s = ev.session;
     const m = model();
@@ -149,8 +194,8 @@ async function detail(id: string): Promise<void> {
         <div class="field"><label for="f-actual">Actual result</label><textarea class="input" id="f-actual" placeholder="What happened?">${esc(ev.report.actual)}</textarea></div>
         <div class="field"><label for="f-exp">Expected result</label><textarea class="input" id="f-exp" placeholder="What should have happened? (always written by you)">${esc(ev.report.expected)}</textarea></div>
         <div class="field" style="margin:0"><label for="f-notes">Notes</label><textarea class="input" id="f-notes" placeholder="Optional">${esc(ev.report.notes)}</textarea></div></section>
-      <section class="card panelcard"><h2>${icon('list-checks')}Steps to reproduce<span class="sp small faint">draft · observed actions only</span></h2>
-        ${m.steps.length ? `<ol class="steps">${m.steps.slice(0, 40).map((st) => `<li><span>${esc(st.text)}</span><span class="rel">${st.rel}</span></li>`).join('')}</ol>` : '<p class="muted small">No actions were recorded.</p>'}</section>
+      <section class="card panelcard"><h2>${icon('list-checks')}Steps to reproduce<span class="sp small faint">draft from observed actions</span></h2>
+        <div id="steps">${stepsHtml(m.steps)}</div></section>
       ${markers.length ? `<section class="card panelcard"><h2>${icon('flag')}Markers</h2><div class="markers">${markers.map((e) => `<div class="markrow">${icon('flag')}<input class="input" type="text" aria-label="Marker label" data-marker="${e.id}" value="${esc(e.label ?? '')}"><span class="small faint num">${formatClock(Math.max(0, e.ts - s.startedAt))}</span></div>`).join('')}</div></section>` : ''}
       <section class="card panelcard"><h2>${icon('download')}Export</h2>
         ${policy.managed && (policy.allowedExportFormats || !policy.allowUnredactedOriginals || policy.requireExportConfirmation) ? `<p class="small faint" id="export-managed">${icon('lock')}Export options are set by your organization.</p>` : ''}
@@ -163,6 +208,7 @@ async function detail(id: string): Promise<void> {
     </div></div></div>
     <div class="lightbox" id="lightbox" hidden><img alt=""><button class="iconbtn" id="lbclose" aria-label="Close">${icon('x')}</button></div>`;
     wire(m);
+    wireSteps();
   };
 
   const readFields = () => {

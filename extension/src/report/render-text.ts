@@ -18,7 +18,10 @@ export function renderTxt(m: ReportModel): string {
   L.push('', 'Steps to reproduce (draft, generated from observed actions)', '-'.repeat(60));
   if (m.preSession.present) L.push(`(Pre-session Context ${m.preSession.kept ? 'kept as separate context' : 'removed'}; its events are not part of these steps.)`);
   if (!m.steps.length) L.push('(no actions recorded)');
-  m.steps.forEach((s) => L.push(`${String(s.n).padStart(2)}. [${s.rel}] ${s.text}`));
+  m.steps.forEach((s) => {
+    L.push(`${String(s.n).padStart(2)}. [${s.rel}] ${s.text}`);
+    if (s.renamed) L.push(`    observed: ${s.observed}`);
+  });
   L.push('', 'Expected result', '-'.repeat(60), m.expected || '(not provided)');
   L.push('', 'Actual result', '-'.repeat(60), m.actual || '(not provided)');
   if (m.notes) L.push('', 'Notes', '-'.repeat(60), m.notes);
@@ -39,7 +42,7 @@ export function renderMarkdown(m: ReportModel): string {
   if (m.endNote) L.push('', `> ${m.endNote}`);
   L.push('', '## Steps to reproduce', '');
   if (!m.steps.length) L.push('_No actions recorded._');
-  m.steps.forEach((s) => L.push(`${s.n}. \`${s.rel}\` ${s.text}`));
+  m.steps.forEach((s) => L.push(`${s.n}. \`${s.rel}\` ${s.text}${s.renamed ? ` (observed: ${s.observed})` : ''}`));
   L.push('', '## Expected result', '', m.expected || '_not provided_', '', '## Actual result', '', m.actual || '_not provided_');
   if (m.notes) L.push('', '## Notes', '', m.notes);
   if (m.moments.length) {

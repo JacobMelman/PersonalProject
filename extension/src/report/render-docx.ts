@@ -25,7 +25,7 @@ export async function renderDocx(m: ReportModel): Promise<Blob> {
       ],
     }),
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Steps to reproduce (draft from observed actions)')] }),
-    ...(m.steps.length ? m.steps.map((s) => para(`${s.n}. [${s.rel}] ${s.text}`)) : [para('No actions recorded.', { italics: true })]),
+    ...(m.steps.length ? m.steps.flatMap((s) => [para(`${s.n}. [${s.rel}] ${s.text}`), ...(s.renamed ? [para(`    observed: ${s.observed}`, { italics: true })] : [])]) : [para('No actions recorded.', { italics: true })]),
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Expected result')] }),
     para(m.expected || '(not provided)'),
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Actual result')] }),

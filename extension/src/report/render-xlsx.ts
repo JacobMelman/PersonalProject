@@ -23,9 +23,9 @@ export function renderXlsx(m: ReportModel): Blob {
     ['Replay video', m.video ? m.video.filename : 'not available'],
     ['Screenshots', m.screenshots.map((s) => s.filename).join('; ')],
   ];
-  const steps: string[][] = [['#', 'Time', 'Step'], ...m.steps.map((s) => [String(s.n), s.rel, s.text])];
+  const steps: string[][] = [['#', 'Time', 'Step', 'Observed action (when renamed)'], ...m.steps.map((s) => [String(s.n), s.rel, s.text, s.renamed ? s.observed : ''])];
   const timeline: string[][] = [['Time', 'Type', 'Event'], ...m.timeline.map((t) => [t.rel, t.type, t.text])];
-  const sheets = [['Report', meta, [24, 90]], ['Steps', steps, [6, 10, 90]], ['Timeline', timeline, [10, 12, 90]]] as const;
+  const sheets = [['Report', meta, [24, 90]], ['Steps', steps, [6, 10, 70, 60]], ['Timeline', timeline, [10, 12, 90]]] as const;
   const files: Record<string, Uint8Array> = {
     '[Content_Types].xml': strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`),
     '_rels/.rels': strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),

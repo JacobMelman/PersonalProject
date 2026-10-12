@@ -187,6 +187,8 @@ export interface ReportRecord {
   expected: string;
   notes: string;
   severity: string;
+  /** The reporter's own wording for draft steps, by step key (see report/model.ts). The observed actions stay in the timeline. */
+  stepTexts?: Record<string, string>;
   updatedAt: number;
 }
 

@@ -28,6 +28,7 @@ h2{font-size:12px;letter-spacing:.8px;text-transform:uppercase;color:var(--faint
 ol.steps{list-style:none;counter-reset:s;margin:0;padding:0;display:grid;gap:11px}
 ol.steps li{counter-increment:s;display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:start}
 ol.steps li::before{content:counter(s);display:grid;place-items:center;width:24px;height:24px;border-radius:99px;background:var(--soft);color:var(--brand);font-weight:700;font-size:12px}
+.obs{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
 .t{color:var(--faint);font-variant-numeric:tabular-nums;font-size:12.5px;padding-top:2px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.two h3{margin:0 0 6px;font-size:13px;color:var(--muted);font-weight:650}.two p,pre{margin:0;white-space:pre-wrap;font:inherit}
 .exp h3{color:var(--green)}.act h3{color:var(--red)}
@@ -67,7 +68,7 @@ export function renderHtml(m: ReportModel, assets: 'inline' | 'zip'): string {
 ${m.endNote ? `<div class="callout">${esc(m.endNote)}</div>` : ''}
 <div class="stats"><div class="stat"><b>${m.durationMs != null ? formatClock(m.durationMs) : '—'}</b><span>Duration</span></div><div class="stat"><b>${m.steps.length}</b><span>Steps</span></div><div class="stat"><b>${m.moments.filter((x) => !x.system).length}</b><span>Markers</span></div><div class="stat"><b>${m.screenshots.length}</b><span>Screenshots</span></div></div>
 <h2>Steps to reproduce <span style="text-transform:none;letter-spacing:0;font-weight:500">· draft from observed actions</span></h2>
-<div class="card">${m.preSession.present ? `<p class="muted" style="margin:0 0 12px;font-size:13px">Pre-session context (${m.preSession.seconds}s) is ${m.preSession.kept ? 'kept as separate context' : 'removed'} and is not part of these steps.</p>` : ''}${m.steps.length ? `<ol class="steps">${m.steps.map((s) => `<li><span>${esc(s.text)}</span><span class="t">${esc(s.rel)}</span></li>`).join('')}</ol>` : '<span class="muted">No actions recorded.</span>'}</div>
+<div class="card">${m.preSession.present ? `<p class="muted" style="margin:0 0 12px;font-size:13px">Pre-session context (${m.preSession.seconds}s) is ${m.preSession.kept ? 'kept as separate context' : 'removed'} and is not part of these steps.</p>` : ''}${m.steps.length ? `<ol class="steps">${m.steps.map((s) => `<li><span>${esc(s.text)}${s.renamed ? `<small class="obs">observed: ${esc(s.observed)}</small>` : ''}</span><span class="t">${esc(s.rel)}</span></li>`).join('')}</ol>` : '<span class="muted">No actions recorded.</span>'}</div>
 <h2>Result</h2><div class="two"><div class="card exp"><h3>Expected</h3><p>${m.expected ? esc(m.expected) : '<span class="muted">not provided</span>'}</p></div><div class="card act"><h3>Actual</h3><p>${m.actual ? esc(m.actual) : '<span class="muted">not provided</span>'}</p></div></div>
 ${m.notes ? `<h2>Notes</h2><div class="card"><pre>${esc(m.notes)}</pre></div>` : ''}
 <h2>Important moments</h2><div class="card">${m.moments.length ? `<ul class="moments">${m.moments.map((x) => `<li class="${x.system ? 'sys' : ''}"><span class="t">${esc(x.rel)}</span><span class="dot"></span><span>${esc(x.label)}${x.note ? ` <span class="muted">· ${esc(x.note)}</span>` : ''}</span></li>`).join('')}</ul>` : '<span class="muted">None recorded.</span>'}</div>

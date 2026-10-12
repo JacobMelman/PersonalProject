@@ -117,7 +117,7 @@ function formatClock(ms) {
 }
 
 // src/report/model.ts
-var SESSION_TYPE = { instant: "Instant Replay", repro: "Repro Session", screenshot: "Screenshot-only" };
+var STEP_TEXT_MAX = 300, cleanStepText = (t) => t.replace(/\s+/g, " ").trim().slice(0, STEP_TEXT_MAX), SESSION_TYPE = { instant: "Instant Replay", repro: "Repro Session", screenshot: "Screenshot-only" };
 function describeElement(el) {
   if (!el) return "element";
   let role = el.role ?? el.tag, name = el.label ? ` "${el.label}"` : el.stableId ? ` [${el.stableId}]` : "";
@@ -141,7 +141,7 @@ function eventText(e) {
       return `${e.label ?? "System event"}${e.note ? ` (${e.note})` : ""}`;
   }
 }
-function draftSteps(events, from) {
+function draftSteps(events, from, names = {}) {
   let acts = events.filter((e) => e.ts >= from && ["click", "navigate", "submit", "focus"].includes(e.type)).sort((a, b) => a.ts - b.ts), kept = [];
   return acts.forEach((e, i2) => {
     if (e.type === "focus") {
@@ -150,7 +150,10 @@ function draftSteps(events, from) {
     }
     let prev = kept[kept.length - 1];
     prev && prev.type === e.type && eventText(prev) === eventText(e) && e.ts - prev.ts < 400 || kept.push(e);
-  }), kept.map((e, i2) => ({ n: i2 + 1, ts: e.ts, rel: formatClock(e.ts - from), text: eventText(e) }));
+  }), kept.map((e, i2) => {
+    let key = `${e.type}@${e.ts}`, observed = eventText(e), own = names[key] ? cleanStepText(names[key]) : "";
+    return { n: i2 + 1, ts: e.ts, rel: formatClock(e.ts - from), key, observed, text: own || observed, renamed: !!own };
+  });
 }
 function buildReportModel(inp) {
   let { session, events, shots, report, keepPre } = inp, t0 = session.startedAt, rel = (ts) => ts < t0 ? `-${formatClock(t0 - ts)}` : formatClock(ts - t0), pre = session.preContext, visible = events.filter((e) => keepPre || e.ts >= t0).sort((a, b) => a.ts - b.ts), endNote = session.status === "target_ended" ? `Capture ended because the target became unavailable${session.endReason ? ` (${session.endReason})` : ""}.${session.classification ? ` Reviewer classification: ${session.classification}${session.classificationNote ? ` - ${session.classificationNote}` : ""}.` : ""}` : session.status === "recovered" ? `Recovered Session: recording ended unexpectedly; evidence is complete up to the last committed chunk${session.lastCommittedAt ? ` (${new Date(session.lastCommittedAt).toLocaleString()})` : ""}. ${session.endReason ?? ""}`.trim() : null;
@@ -165,7 +168,7 @@ function buildReportModel(inp) {
     durationMs: session.endedAt ? session.endedAt - t0 : null,
     status: session.status,
     endNote,
-    steps: draftSteps(visible, t0),
+    steps: draftSteps(visible, t0, report.stepTexts),
     preSession: { present: !!pre, kept: !!pre && keepPre, seconds: pre ? Math.round((pre.endWall - pre.startWall) / 1e3) : 0 },
     expected: report.expected,
     actual: report.actual,
@@ -3265,11 +3268,10 @@ function drawClicks(ctx, w, h, marks, tMs) {
 }
 
 // src/report/video-redact.ts
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function renderEditedVideo(sessionId2, edits, opts = {}) {
   let run = await selectRun(sessionId2, opts.fromWall ?? 0);
   if (!run.length) return null;
-  let first = run[0], W = first.width, H = first.height, clock = buildClock(run), nextPause = 0, cuts = normalizeCuts(edits.cuts), canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext("2d", { willReadFrequently: !1 }), raw2 = new OffscreenCanvas(W, H), rctx = raw2.getContext("2d"), hasRaw = !1, marks = opts.clicks ?? [], ticks = clickTicks(marks), nextTick = 0, lastRel = -1e9, cfg = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1e3, framerate: opts.fps ?? 15, latencyMode: "quality", bitrateMode: "variable" };
+  let first = run[0], W = first.width, H = first.height, clock = buildClock(run), nextPause = 0, cuts = normalizeCuts(edits.cuts), canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext("2d", { willReadFrequently: !0 }), raw2 = new OffscreenCanvas(W, H), rctx = raw2.getContext("2d", { willReadFrequently: !0 }), hasRaw = !1, marks = opts.clicks ?? [], ticks = clickTicks(marks), nextTick = 0, lastRel = -1e9, cfg = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1e3, framerate: opts.fps ?? 15, latencyMode: "realtime", bitrateMode: "variable" };
   if (!(await VideoEncoder.isConfigSupported(cfg)).supported) throw new Error(`The browser cannot encode ${first.codec}`);
   let packets = [], frames = 0, lastKeyMs = -1e9, lastOutMs = -1e9, endMs = 0, fatal = null, encoder = new VideoEncoder({
     output: (chunk, meta) => {
@@ -3321,7 +3323,10 @@ async function renderEditedVideo(sessionId2, edits, opts = {}) {
   for (let seg of run)
     for (let c of await readSegment(seg.id)) {
       if (fatal) throw fatal;
-      for (decoder.decode(new EncodedVideoChunk({ type: c.key ? "key" : "delta", timestamp: c.timestampUs, duration: c.durationUs, data: c.data })); decoder.decodeQueueSize > 6 || encoder.encodeQueueSize > 12; ) await sleep(1);
+      for (decoder.decode(new EncodedVideoChunk({ type: c.key ? "key" : "delta", timestamp: c.timestampUs, duration: c.durationUs, data: c.data })); !fatal && (decoder.decodeQueueSize > 6 || encoder.encodeQueueSize > 12); )
+        await new Promise((r) => {
+          (decoder.decodeQueueSize > 6 ? decoder : encoder).addEventListener("dequeue", () => r(), { once: !0 }), setTimeout(r, 500);
+        });
       ++done2 % 30 === 0 && opts.onProgress?.(done2 / total);
     }
   if (await decoder.flush(), flushTicks(lastFrameEnd), await encoder.flush(), decoder.close(), encoder.close(), fatal) throw fatal;
@@ -3371,6 +3376,7 @@ h2{font-size:12px;letter-spacing:.8px;text-transform:uppercase;color:var(--faint
 ol.steps{list-style:none;counter-reset:s;margin:0;padding:0;display:grid;gap:11px}
 ol.steps li{counter-increment:s;display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:start}
 ol.steps li::before{content:counter(s);display:grid;place-items:center;width:24px;height:24px;border-radius:99px;background:var(--soft);color:var(--brand);font-weight:700;font-size:12px}
+.obs{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
 .t{color:var(--faint);font-variant-numeric:tabular-nums;font-size:12.5px;padding-top:2px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.two h3{margin:0 0 6px;font-size:13px;color:var(--muted);font-weight:650}.two p,pre{margin:0;white-space:pre-wrap;font:inherit}
 .exp h3{color:var(--green)}.act h3{color:var(--red)}
@@ -3400,7 +3406,7 @@ function renderHtml(m, assets) {
 ${m.endNote ? `<div class="callout">${esc(m.endNote)}</div>` : ""}
 <div class="stats"><div class="stat"><b>${m.durationMs != null ? formatClock(m.durationMs) : "\u2014"}</b><span>Duration</span></div><div class="stat"><b>${m.steps.length}</b><span>Steps</span></div><div class="stat"><b>${m.moments.filter((x3) => !x3.system).length}</b><span>Markers</span></div><div class="stat"><b>${m.screenshots.length}</b><span>Screenshots</span></div></div>
 <h2>Steps to reproduce <span style="text-transform:none;letter-spacing:0;font-weight:500">\xB7 draft from observed actions</span></h2>
-<div class="card">${m.preSession.present ? `<p class="muted" style="margin:0 0 12px;font-size:13px">Pre-session context (${m.preSession.seconds}s) is ${m.preSession.kept ? "kept as separate context" : "removed"} and is not part of these steps.</p>` : ""}${m.steps.length ? `<ol class="steps">${m.steps.map((s) => `<li><span>${esc(s.text)}</span><span class="t">${esc(s.rel)}</span></li>`).join("")}</ol>` : '<span class="muted">No actions recorded.</span>'}</div>
+<div class="card">${m.preSession.present ? `<p class="muted" style="margin:0 0 12px;font-size:13px">Pre-session context (${m.preSession.seconds}s) is ${m.preSession.kept ? "kept as separate context" : "removed"} and is not part of these steps.</p>` : ""}${m.steps.length ? `<ol class="steps">${m.steps.map((s) => `<li><span>${esc(s.text)}${s.renamed ? `<small class="obs">observed: ${esc(s.observed)}</small>` : ""}</span><span class="t">${esc(s.rel)}</span></li>`).join("")}</ol>` : '<span class="muted">No actions recorded.</span>'}</div>
 <h2>Result</h2><div class="two"><div class="card exp"><h3>Expected</h3><p>${m.expected ? esc(m.expected) : '<span class="muted">not provided</span>'}</p></div><div class="card act"><h3>Actual</h3><p>${m.actual ? esc(m.actual) : '<span class="muted">not provided</span>'}</p></div></div>
 ${m.notes ? `<h2>Notes</h2><div class="card"><pre>${esc(m.notes)}</pre></div>` : ""}
 <h2>Important moments</h2><div class="card">${m.moments.length ? `<ul class="moments">${m.moments.map((x3) => `<li class="${x3.system ? "sys" : ""}"><span class="t">${esc(x3.rel)}</span><span class="dot"></span><span>${esc(x3.label)}${x3.note ? ` <span class="muted">\xB7 ${esc(x3.note)}</span>` : ""}</span></li>`).join("")}</ul>` : '<span class="muted">None recorded.</span>'}</div>
@@ -3414,13 +3420,15 @@ ${m.notes ? `<h2>Notes</h2><div class="card"><pre>${esc(m.notes)}</pre></div>` :
 var dur = (m) => m.durationMs != null ? formatClock(m.durationMs) : "n/a";
 function renderTxt(m) {
   let L = [], line = (k, v) => L.push(`${k.padEnd(14)}${v}`);
-  return L.push(m.title, "=".repeat(Math.min(m.title.length, 80)), ""), line("Type:", m.sessionType), line("Environment:", m.environment), line("Target:", m.target), line("Browser:", m.browser), line("Started:", new Date(m.startedAt).toLocaleString()), line("Duration:", dur(m)), m.severity && line("Severity:", m.severity), m.endNote && L.push("", `NOTE: ${m.endNote}`), L.push("", "Steps to reproduce (draft, generated from observed actions)", "-".repeat(60)), m.preSession.present && L.push(`(Pre-session Context ${m.preSession.kept ? "kept as separate context" : "removed"}; its events are not part of these steps.)`), m.steps.length || L.push("(no actions recorded)"), m.steps.forEach((s) => L.push(`${String(s.n).padStart(2)}. [${s.rel}] ${s.text}`)), L.push("", "Expected result", "-".repeat(60), m.expected || "(not provided)"), L.push("", "Actual result", "-".repeat(60), m.actual || "(not provided)"), m.notes && L.push("", "Notes", "-".repeat(60), m.notes), L.push("", "Important moments", "-".repeat(60)), m.moments.length || L.push("(none)"), m.moments.forEach((x3) => L.push(`[${x3.rel}] ${x3.system ? "(system) " : ""}${x3.label}${x3.note ? ` - ${x3.note}` : ""}`)), L.push("", "Attachments / evidence", "-".repeat(60)), m.video ? L.push(`Video: ${m.video.filename} (${m.video.codec}, ${m.video.width}x${m.video.height}, ${formatClock(m.video.durationMs)}) - see the Evidence Package`) : L.push(`Video: not available${m.videoNote ? ` (${m.videoNote})` : ""}`), m.screenshots.forEach((s) => L.push(`Screenshot: ${s.filename} [${s.rel}] ${s.label} - see the Evidence Package (TXT cannot embed images)`)), L.join(`
+  return L.push(m.title, "=".repeat(Math.min(m.title.length, 80)), ""), line("Type:", m.sessionType), line("Environment:", m.environment), line("Target:", m.target), line("Browser:", m.browser), line("Started:", new Date(m.startedAt).toLocaleString()), line("Duration:", dur(m)), m.severity && line("Severity:", m.severity), m.endNote && L.push("", `NOTE: ${m.endNote}`), L.push("", "Steps to reproduce (draft, generated from observed actions)", "-".repeat(60)), m.preSession.present && L.push(`(Pre-session Context ${m.preSession.kept ? "kept as separate context" : "removed"}; its events are not part of these steps.)`), m.steps.length || L.push("(no actions recorded)"), m.steps.forEach((s) => {
+    L.push(`${String(s.n).padStart(2)}. [${s.rel}] ${s.text}`), s.renamed && L.push(`    observed: ${s.observed}`);
+  }), L.push("", "Expected result", "-".repeat(60), m.expected || "(not provided)"), L.push("", "Actual result", "-".repeat(60), m.actual || "(not provided)"), m.notes && L.push("", "Notes", "-".repeat(60), m.notes), L.push("", "Important moments", "-".repeat(60)), m.moments.length || L.push("(none)"), m.moments.forEach((x3) => L.push(`[${x3.rel}] ${x3.system ? "(system) " : ""}${x3.label}${x3.note ? ` - ${x3.note}` : ""}`)), L.push("", "Attachments / evidence", "-".repeat(60)), m.video ? L.push(`Video: ${m.video.filename} (${m.video.codec}, ${m.video.width}x${m.video.height}, ${formatClock(m.video.durationMs)}) - see the Evidence Package`) : L.push(`Video: not available${m.videoNote ? ` (${m.videoNote})` : ""}`), m.screenshots.forEach((s) => L.push(`Screenshot: ${s.filename} [${s.rel}] ${s.label} - see the Evidence Package (TXT cannot embed images)`)), L.join(`
 `) + `
 `;
 }
 function renderMarkdown(m) {
   let L = [`# ${m.title}`, ""];
-  return L.push(`- **Type:** ${m.sessionType}`, `- **Environment:** ${m.environment}`, `- **Target:** ${m.target}`, `- **Browser:** ${m.browser}`, `- **Started:** ${new Date(m.startedAt).toLocaleString()}`, `- **Duration:** ${dur(m)}`), m.severity && L.push(`- **Severity:** ${m.severity}`), m.endNote && L.push("", `> ${m.endNote}`), L.push("", "## Steps to reproduce", ""), m.steps.length || L.push("_No actions recorded._"), m.steps.forEach((s) => L.push(`${s.n}. \`${s.rel}\` ${s.text}`)), L.push("", "## Expected result", "", m.expected || "_not provided_", "", "## Actual result", "", m.actual || "_not provided_"), m.notes && L.push("", "## Notes", "", m.notes), m.moments.length && (L.push("", "## Important moments", ""), m.moments.forEach((x3) => L.push(`- \`${x3.rel}\` ${x3.system ? "_(system)_ " : ""}${x3.label}`))), L.push("", "## Evidence", "", m.video ? `- Video: \`${m.video.filename}\`` : "- Video: not available"), m.screenshots.forEach((s) => L.push(`- Screenshot: \`${s.filename}\` (${s.label})`)), L.join(`
+  return L.push(`- **Type:** ${m.sessionType}`, `- **Environment:** ${m.environment}`, `- **Target:** ${m.target}`, `- **Browser:** ${m.browser}`, `- **Started:** ${new Date(m.startedAt).toLocaleString()}`, `- **Duration:** ${dur(m)}`), m.severity && L.push(`- **Severity:** ${m.severity}`), m.endNote && L.push("", `> ${m.endNote}`), L.push("", "## Steps to reproduce", ""), m.steps.length || L.push("_No actions recorded._"), m.steps.forEach((s) => L.push(`${s.n}. \`${s.rel}\` ${s.text}${s.renamed ? ` (observed: ${s.observed})` : ""}`)), L.push("", "## Expected result", "", m.expected || "_not provided_", "", "## Actual result", "", m.actual || "_not provided_"), m.notes && L.push("", "## Notes", "", m.notes), m.moments.length && (L.push("", "## Important moments", ""), m.moments.forEach((x3) => L.push(`- \`${x3.rel}\` ${x3.system ? "_(system)_ " : ""}${x3.label}`))), L.push("", "## Evidence", "", m.video ? `- Video: \`${m.video.filename}\`` : "- Video: not available"), m.screenshots.forEach((s) => L.push(`- Screenshot: \`${s.filename}\` (${s.label})`)), L.join(`
 `) + `
 `;
 }
@@ -21049,7 +21057,7 @@ async function renderDocx(m) {
       ]
     }),
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Steps to reproduce (draft from observed actions)")] }),
-    ...m.steps.length ? m.steps.map((s) => para(`${s.n}. [${s.rel}] ${s.text}`)) : [para("No actions recorded.", { italics: !0 })],
+    ...m.steps.length ? m.steps.flatMap((s) => [para(`${s.n}. [${s.rel}] ${s.text}`), ...s.renamed ? [para(`    observed: ${s.observed}`, { italics: !0 })] : []]) : [para("No actions recorded.", { italics: !0 })],
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Expected result")] }),
     para(m.expected || "(not provided)"),
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Actual result")] }),
@@ -21533,7 +21541,7 @@ function renderXlsx(m) {
     ["Outcome note", m.endNote ?? ""],
     ["Replay video", m.video ? m.video.filename : "not available"],
     ["Screenshots", m.screenshots.map((s) => s.filename).join("; ")]
-  ], steps = [["#", "Time", "Step"], ...m.steps.map((s) => [String(s.n), s.rel, s.text])], timeline = [["Time", "Type", "Event"], ...m.timeline.map((t) => [t.rel, t.type, t.text])], sheets = [["Report", meta, [24, 90]], ["Steps", steps, [6, 10, 90]], ["Timeline", timeline, [10, 12, 90]]], files = {
+  ], steps = [["#", "Time", "Step", "Observed action (when renamed)"], ...m.steps.map((s) => [String(s.n), s.rel, s.text, s.renamed ? s.observed : ""])], timeline = [["Time", "Type", "Event"], ...m.timeline.map((t) => [t.rel, t.type, t.text])], sheets = [["Report", meta, [24, 90]], ["Steps", steps, [6, 10, 70, 60]], ["Timeline", timeline, [10, 12, 90]]], files = {
     "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_s, i2) => `<Override PartName="/xl/worksheets/sheet${i2 + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`),
     "_rels/.rels": strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
     "xl/workbook.xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s, i2) => `<sheet name="${s[0]}" sheetId="${i2 + 1}" r:id="rId${i2 + 1}"/>`).join("")}</sheets></workbook>`),
@@ -23343,7 +23351,31 @@ Video and screenshots can show sensitive values that were visible in the tested 
     });
   };
   await buildVideo();
-  let shotUrls = ev.shots.map((s) => URL.createObjectURL(new Blob([s.data], { type: "image/png" }))), visibleEvents = () => ev.events.filter((e) => keepPre || e.ts >= ev.session.startedAt).sort((a, b) => a.ts - b.ts), draw = () => {
+  let shotUrls = ev.shots.map((s) => URL.createObjectURL(new Blob([s.data], { type: "image/png" }))), visibleEvents = () => ev.events.filter((e) => keepPre || e.ts >= ev.session.startedAt).sort((a, b) => a.ts - b.ts), stepsHtml = (steps) => steps.length ? `<ol class="steps">${steps.slice(0, 40).map((st) => `<li data-step="${esc2(st.key)}"><span class="stx">${esc2(st.text)}${st.renamed ? `<span class="obs" title="Observed action">${icon("mouse-pointer-click")}${esc2(st.observed)}</span>` : ""}</span><span class="rel">${st.rel}</span><span class="stbtns"><button class="iconbtn" data-rename aria-label="Rename step ${st.n}" title="Rename">${icon("pencil")}</button>${st.renamed ? `<button class="iconbtn" data-reset aria-label="Back to the observed action for step ${st.n}" title="Back to the observed action">${icon("rotate-ccw")}</button>` : ""}</span></li>`).join("")}</ol>` : '<p class="muted small">No actions were recorded.</p>', setStepText = async (key, text) => {
+    let names = { ...ev.report.stepTexts ?? {} }, step = model().steps.find((s) => s.key === key), clean = cleanStepText(text);
+    !clean || clean === step?.observed ? delete names[key] : names[key] = clean, ev.report = { ...ev.report, stepTexts: names }, await saveReport(ev.report), document.getElementById("steps").innerHTML = stepsHtml(model().steps);
+  }, wireSteps = () => {
+    let box = document.getElementById("steps");
+    box?.addEventListener("click", (e) => {
+      let btn = e.target.closest("button"), li = e.target.closest("li[data-step]");
+      if (!btn || !li) return;
+      let key = li.dataset.step;
+      if (btn.hasAttribute("data-reset")) return void setStepText(key, "");
+      if (!btn.hasAttribute("data-rename")) return;
+      let step = model().steps.find((s) => s.key === key);
+      if (!step) return;
+      let tx = li.querySelector(".stx");
+      tx.innerHTML = `<input class="input sm" type="text" maxlength="${STEP_TEXT_MAX}" aria-label="Step ${step.n} name" value="${esc2(step.text)}">`;
+      let input = tx.querySelector("input");
+      input.focus(), input.select();
+      let done2 = !1, finish = (save) => {
+        done2 || (done2 = !0, save ? setStepText(key, input.value) : box.innerHTML = stepsHtml(model().steps));
+      };
+      input.addEventListener("keydown", (k) => {
+        k.key === "Enter" && (k.preventDefault(), finish(!0)), k.key === "Escape" && (k.preventDefault(), finish(!1));
+      }), input.addEventListener("blur", () => finish(!0));
+    });
+  }, draw = () => {
     let s = ev.session, m = model(), pre = s.preContext, events = visibleEvents(), markers = events.filter((e) => e.type === "marker"), classOpts = ["", "UI/Application crashed", "Fatal error and closed", "Tab crashed", "Browser closed", "Application became unresponsive", "Other"];
     app.innerHTML = `<div class="page">${topbar(esc2(SESSION_TYPE[s.kind] ?? s.kind))}
     <div class="title"><div><h1>${esc2(ev.report.title)}</h1>
@@ -23381,8 +23413,8 @@ Video and screenshots can show sensitive values that were visible in the tested 
         <div class="field"><label for="f-actual">Actual result</label><textarea class="input" id="f-actual" placeholder="What happened?">${esc2(ev.report.actual)}</textarea></div>
         <div class="field"><label for="f-exp">Expected result</label><textarea class="input" id="f-exp" placeholder="What should have happened? (always written by you)">${esc2(ev.report.expected)}</textarea></div>
         <div class="field" style="margin:0"><label for="f-notes">Notes</label><textarea class="input" id="f-notes" placeholder="Optional">${esc2(ev.report.notes)}</textarea></div></section>
-      <section class="card panelcard"><h2>${icon("list-checks")}Steps to reproduce<span class="sp small faint">draft \xB7 observed actions only</span></h2>
-        ${m.steps.length ? `<ol class="steps">${m.steps.slice(0, 40).map((st) => `<li><span>${esc2(st.text)}</span><span class="rel">${st.rel}</span></li>`).join("")}</ol>` : '<p class="muted small">No actions were recorded.</p>'}</section>
+      <section class="card panelcard"><h2>${icon("list-checks")}Steps to reproduce<span class="sp small faint">draft from observed actions</span></h2>
+        <div id="steps">${stepsHtml(m.steps)}</div></section>
       ${markers.length ? `<section class="card panelcard"><h2>${icon("flag")}Markers</h2><div class="markers">${markers.map((e) => `<div class="markrow">${icon("flag")}<input class="input" type="text" aria-label="Marker label" data-marker="${e.id}" value="${esc2(e.label ?? "")}"><span class="small faint num">${formatClock(Math.max(0, e.ts - s.startedAt))}</span></div>`).join("")}</div></section>` : ""}
       <section class="card panelcard"><h2>${icon("download")}Export</h2>
         ${policy.managed && (policy.allowedExportFormats || !policy.allowUnredactedOriginals || policy.requireExportConfirmation) ? `<p class="small faint" id="export-managed">${icon("lock")}Export options are set by your organization.</p>` : ""}
@@ -23393,7 +23425,7 @@ Video and screenshots can show sensitive values that were visible in the tested 
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">${formats.length ? `<button class="btn primary" id="export" style="flex:1">${icon("download")}Export selected</button>` : ""}${okFormats.includes("md") ? `<button class="btn" id="cpmd">${icon("copy")}Markdown</button>` : ""}${okFormats.includes("txt") ? `<button class="btn" id="cptxt">${icon("copy")}Text</button>` : ""}</div>
         <div class="exstatus" id="exstatus">${exportNote}</div></section>
     </div></div></div>
-    <div class="lightbox" id="lightbox" hidden><img alt=""><button class="iconbtn" id="lbclose" aria-label="Close">${icon("x")}</button></div>`, wire(m);
+    <div class="lightbox" id="lightbox" hidden><img alt=""><button class="iconbtn" id="lbclose" aria-label="Close">${icon("x")}</button></div>`, wire(m), wireSteps();
   }, readFields = () => {
     ev.report = {
       ...ev.report,
