@@ -203,6 +203,8 @@ export async function exportZip(port, sessionId, dir, fmt = 'zip') {
   await sleep(1500);
   await rv.eval(`document.querySelectorAll('[data-fmt]').forEach((c) => (c.checked = c.dataset.fmt === ${JSON.stringify(fmt)})); document.getElementById('export').click();`, { gesture: true });
   for (let i = 0; i < 60; i++) { const f = readdirSync(dir).find((x) => x.endsWith('.' + fmt)); if (f) { await sleep(800); rv.close(); b.close(); return path.join(dir, f); } await sleep(500); }
+  // say why: the Review page's own export status (rendering progress or an error)
+  console.log('INFO  export status:', JSON.stringify(await rv.eval(`document.getElementById('exstatus')?.textContent?.trim() ?? '(none)'`).catch((e) => String(e))));
   rv.close(); b.close();
   return null;
 }

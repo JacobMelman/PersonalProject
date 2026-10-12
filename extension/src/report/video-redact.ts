@@ -18,7 +18,6 @@ export interface EditedVideo {
   codec: string;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function renderEditedVideo(
   sessionId: string,
@@ -33,16 +32,19 @@ export async function renderEditedVideo(
   let nextPause = 0;
   const cuts = normalizeCuts(edits.cuts);
   const canvas = new OffscreenCanvas(W, H); // what is encoded: the last decoded frame + masks + click highlights
-  const ctx = canvas.getContext('2d', { willReadFrequently: false })!;
+  // CPU-backed canvases: every frame is read back by the encoder (and by the mosaic); with a GPU-backed canvas that readback
+  // dominated the export on machines without a fast GPU
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const raw = new OffscreenCanvas(W, H); // the last decoded frame as recorded
-  const rctx = raw.getContext('2d')!;
+  const rctx = raw.getContext('2d', { willReadFrequently: true })!;
   let hasRaw = false;
   const marks = opts.clicks ?? [];
   const ticks = clickTicks(marks);
   let nextTick = 0;
   let lastRel = -1e9;
 
-  const cfg: VideoEncoderConfig = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1000, framerate: opts.fps ?? 15, latencyMode: 'quality', bitrateMode: 'variable' };
+  // 'realtime' like the recording itself: 'quality' made a long or busy replay take minutes to export for no visible gain
+  const cfg: VideoEncoderConfig = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1000, framerate: opts.fps ?? 15, latencyMode: 'realtime', bitrateMode: 'variable' };
   if (!(await VideoEncoder.isConfigSupported(cfg)).supported) throw new Error(`The browser cannot encode ${first.codec}`);
 
   const packets: Array<{ packet: EncodedPacket; decoderConfig?: VideoDecoderConfig }> = [];
@@ -121,7 +123,15 @@ export async function renderEditedVideo(
     for (const c of await readSegment(seg.id)) {
       if (fatal) throw fatal;
       decoder.decode(new EncodedVideoChunk({ type: c.key ? 'key' : 'delta', timestamp: c.timestampUs, duration: c.durationUs, data: c.data }));
-      while (decoder.decodeQueueSize > 6 || encoder.encodeQueueSize > 12) await sleep(1);
+      // back-pressure on the codecs' own events: timers are throttled to once a second in a background tab, which made an
+      // export crawl when the Review tab was not in front
+      while (!fatal && (decoder.decodeQueueSize > 6 || encoder.encodeQueueSize > 12)) {
+        await new Promise<void>((r) => {
+          const t = decoder.decodeQueueSize > 6 ? decoder : encoder;
+          t.addEventListener('dequeue', () => r(), { once: true });
+          setTimeout(r, 500); // never hang if a codec stops (an error is reported through `fatal`)
+        });
+      }
       if (++done % 30 === 0) opts.onProgress?.(done / total);
     }
   }
