@@ -26,6 +26,8 @@ export interface PackageInput {
   version: string;
   /** Set when the replay was re-rendered with privacy edits (counts only; geometry stays out of the package). */
   videoEdits?: { masks: number; cuts: number };
+  /** The exported video shows click highlights (drawn over the recording; the stored original has none). */
+  clickHighlights?: boolean;
 }
 
 export async function buildEvidencePackage(inp: PackageInput): Promise<Blob> {
@@ -59,7 +61,7 @@ export async function buildEvidencePackage(inp: PackageInput): Promise<Blob> {
     end: session.endedAt ? new Date(session.endedAt).toISOString() : null,
     last_committed: session.lastCommittedAt ? new Date(session.lastCommittedAt).toISOString() : null,
     pre_session_context: session.preContext ? { present: true, kept: inp.keepPre, seconds: Math.round((session.preContext.endWall - session.preContext.startWall) / 1000) } : { present: false },
-    video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, pauses_not_recorded: video.clock.pauses.map((p) => ({ from_wall_ms: p.fromWall, to_wall_ms: p.toWall, reason: p.reason ?? null, shown_at_ms: Math.round(p.atMs), shown_for_ms: p.holdMs })), redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : false } : null,
+    video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, pauses_not_recorded: video.clock.pauses.map((p) => ({ from_wall_ms: p.fromWall, to_wall_ms: p.toWall, reason: p.reason ?? null, shown_at_ms: Math.round(p.atMs), shown_for_ms: p.holdMs })), redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : false, click_highlights: !!inp.clickHighlights } : null,
     screenshots: shots.map((sh) => ({ id: sh.id, annotated: (sh.annotations?.length ?? 0) > 0, redacted: hasRedaction(sh.annotations), original_included: Object.keys(inp.extraFiles ?? {}).some((k) => k.startsWith('screenshots/originals/') && k.includes(sh.id)) })),
     notes: 'sha256 values are integrity metadata only, not a claim of forensic chain-of-custody. Redacted screenshots are exported flattened; originals are included only when the exporter asked for them.',
     artifacts,

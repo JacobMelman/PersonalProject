@@ -52,6 +52,7 @@ async function handle(op: OffscreenOp): Promise<unknown> {
     case 'save-replay': {
       // Pre-trigger window is already in storage; wait for the post-trigger tail, then freeze + pin it.
       if (op.tailMs > 0 && recorder && !recorder.paused) await sleep(op.tailMs);
+      recorder?.holdLatest(); // the video reaches the end of the window even if the page stopped changing
       await recorder?.flushNow();
       const tailEnd = Date.now();
       const segs = await pinWindow(op.sessionId, op.triggerWall, op.preMs, tailEnd);
@@ -76,6 +77,7 @@ async function handle(op: OffscreenOp): Promise<unknown> {
       return recorder.grabScreenshot(op.file);
     }
     case 'pin-stop':
+      recorder?.holdLatest();
       await recorder?.flushNow();
       recorder?.setPinSession(null);
       return { ok: true };

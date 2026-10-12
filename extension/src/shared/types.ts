@@ -47,6 +47,8 @@ export interface Settings {
   markerScreenshot: boolean;
   captureVideo: boolean;
   openReviewAfterSave: boolean;
+  /** Show where the user clicked: a ring over the replay in Review and in exported video (the recording itself is unchanged). */
+  highlightClicks: boolean;
   /** Extra origins that count as the same Target Profile (semantic scope). */
   approvedOrigins: string[];
   environment: string;
@@ -62,6 +64,7 @@ export const DEFAULT_SETTINGS: Settings = {
   markerScreenshot: true,
   captureVideo: true,
   openReviewAfterSave: true,
+  highlightClicks: true,
   approvedOrigins: [],
   environment: 'QA',
 };
@@ -143,6 +146,8 @@ export interface TimelineEvent {
   element?: ElementDescriptor;
   /** Normalised click position inside the viewport (0..1). */
   pos?: { x: number; y: number };
+  /** Viewport size (CSS px) at the click: places `pos` correctly when the video frame has letterbox bars. */
+  vp?: { w: number; h: number };
   label?: string;
   note?: string;
   ordinal?: number;

@@ -253,7 +253,7 @@ body.noscroll{overflow:hidden}
 .shot .flag{position:absolute;left:8px;top:8px;z-index:2}
 
 /* ---------- privacy tools on the player ---------- */
-.stage{position:relative;line-height:0}.vover{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.stage{position:relative;line-height:0}.vover{position:absolute;inset:0;pointer-events:none;overflow:hidden}.vclicks{position:absolute;pointer-events:none}.hlclicks{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .vmask{position:absolute;border:2px dashed #ffb020;border-radius:4px;box-shadow:0 0 0 1px rgba(0,0,0,.4)}
 .vmask.blur{backdrop-filter:blur(26px) saturate(.5);background:rgba(245,245,245,.5)}.vmask.redact{background:#000;border-color:#ffb020}.vmask.draft{border-color:#6b86ff;background:rgba(107,134,255,.18)}
 .maskdraw{position:absolute;inset:0;z-index:3;cursor:crosshair;background:rgba(5,8,13,.18);touch-action:none}

@@ -19,7 +19,8 @@ import { hasRedaction } from '../shared/annotations';
 import type { SessionRecord, TimelineEvent, TimelineType } from '../shared/types';
 import { icon, type IconName } from '../ui/icons';
 import { logo } from '../ui/brand';
-import { getPolicy } from '../shared/settings';
+import { getPolicy, getSettings, saveSettings } from '../shared/settings';
+import { clickMarks, drawClicks } from '../shared/click-marks';
 import { allowedFormats, type ExportFormat, type Policy } from '../shared/policy';
 import { ago, bytes, duration, esc, host } from '../ui/format';
 
@@ -75,6 +76,9 @@ async function detail(id: string): Promise<void> {
   let previewing = false;
   let previewUrl = '';
   let maskDraft: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  // Click highlights: drawn over the player and into exported copies, never into the stored recording.
+  let showClicks = (await getSettings()).highlightClicks !== false;
+  const marks = () => (video ? clickMarks(ev.events, video.clock, video.durationMs, { w: video.width, h: video.height }) : []);
 
   const buildVideo = async () => {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -124,7 +128,7 @@ async function detail(id: string): Promise<void> {
     </div>
     <div class="grid2"><div class="col">
       <section class="card panelcard"><h2>${icon('film')}Replay</h2>
-        ${video ? `<div class="player"><div class="stage" id="stage"><video id="vid" controls playsinline src="${videoUrl}"></video><div class="vover" id="vover"></div></div><div class="player__bar"><span>${icon('video')} ${video.codec.startsWith('vp09') ? 'VP9' : 'VP8'} · ${video.segments} GOP segments${video.gaps.length ? ` · ${video.gaps.length} capture gap${video.gaps.length > 1 ? 's' : ''} (pauses)` : ''}</span><span style="margin-left:auto">Click a timeline row to jump</span></div></div>
+        ${video ? `<div class="player"><div class="stage" id="stage"><video id="vid" controls playsinline src="${videoUrl}"></video><div class="vover" id="vover"></div><canvas class="vclicks" id="vclicks" aria-hidden="true"></canvas></div><div class="player__bar"><span>${icon('video')} ${video.codec.startsWith('vp09') ? 'VP9' : 'VP8'} · ${video.segments} GOP segments${video.gaps.length ? ` · ${video.gaps.length} capture gap${video.gaps.length > 1 ? 's' : ''} (pauses)` : ''}</span><label class="hlclicks" style="margin-left:auto"><input type="checkbox" id="hlclicks" ${showClicks ? 'checked' : ''}> Highlight clicks</label><span>Click a timeline row to jump</span></div></div>
         <div class="ptools" id="ptools"><div class="ptools__head">${icon('shield-alert')}<b>Privacy tools</b><span class="faint small">hide sensitive pixels before export</span></div>
           <div class="ptools__btns"><button class="btn sm" id="pt-mask">${icon('grid-3x3')}Mask a region</button><button class="btn sm" id="pt-cut">${icon('scissors')}Cut out a range</button><button class="btn sm" id="pt-preview">${icon('eye-off')}Preview redacted</button></div>
           <div id="pt-form"></div><ul class="pt-list" id="pt-list"></ul></div>`
@@ -202,8 +206,32 @@ async function detail(id: string): Promise<void> {
     const nowMs = () => Math.round(vid.currentTime * 1000);
     const pct = (v: number) => `${Math.round(v * 100)}%`;
 
+    const cv = document.getElementById('vclicks') as HTMLCanvasElement | null;
+    let clickMarksNow = marks();
+    const paintClicks = () => {
+      if (!cv) return;
+      const c = contentRect(vid);
+      const dpr = devicePixelRatio || 1;
+      cv.style.cssText = `left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px`;
+      const w = Math.max(1, Math.round(c.w * dpr)), h = Math.max(1, Math.round(c.h * dpr));
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      const g = cv.getContext('2d')!;
+      g.clearRect(0, 0, w, h);
+      if (showClicks && !previewing) drawClicks(g, w, h, clickMarksNow, vid.currentTime * 1000); // a preview already has them burned in
+    };
+    let raf = 0;
+    const loop = () => { paintClicks(); raf = vid.paused || vid.ended ? 0 : requestAnimationFrame(loop); };
+    vid.addEventListener('play', () => { if (!raf) raf = requestAnimationFrame(loop); });
+    document.getElementById('hlclicks')?.addEventListener('change', (e) => {
+      showClicks = (e.target as HTMLInputElement).checked;
+      void saveSettings({ highlightClicks: showClicks });
+      if (previewing) document.getElementById('pt-preview')?.click(); // the preview was rendered with the old choice: back to the original
+      paintOverlay();
+    });
     const paintOverlay = () => {
       over.innerHTML = '';
+      clickMarksNow = marks();
+      paintClicks();
       if (previewing) return;
       const c = contentRect(vid);
       const t = nowMs();
@@ -305,7 +333,7 @@ async function detail(id: string): Promise<void> {
       }
       form.innerHTML = `<div class="ptform"><span class="faint small" id="pt-prog">Rendering the redacted copy… 0%</span></div>`;
       try {
-        const out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, onProgress: (f) => { const el = document.getElementById('pt-prog'); if (el) el.textContent = `Rendering the redacted copy… ${Math.round(f * 100)}%`; } });
+        const out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, clicks: showClicks ? marks() : [], onProgress: (f) => { const el = document.getElementById('pt-prog'); if (el) el.textContent = `Rendering the redacted copy… ${Math.round(f * 100)}%`; } });
         if (!out) throw new Error('nothing to render');
         if (previewUrl) URL.revokeObjectURL(previewUrl);
         previewUrl = URL.createObjectURL(out.blob);
@@ -443,10 +471,12 @@ async function detail(id: string): Promise<void> {
       const keptShots = edited && video ? ev.shots.filter((s2) => !inCut(wallToVideoMs(video!.clock, s2.ts), cutsN)) : ev.shots;
       let exportVideo: MuxedVideo | null = video;
       let exportVideoBytes: Uint8Array | undefined;
-      if (edited && video && (document.querySelector('[data-fmt="zip"]') as HTMLInputElement | null)?.checked) {
-        setStatus([`<div class="r">${icon('refresh-cw')}<span id="ex-prog">Rendering the redacted video… 0%</span></div>`]);
+      const clicks = showClicks ? marks() : [];
+      if ((edited || clicks.length) && video && (document.querySelector('[data-fmt="zip"]') as HTMLInputElement | null)?.checked) {
+        const what = edited ? 'redacted video' : 'video with click highlights';
+        setStatus([`<div class="r">${icon('refresh-cw')}<span id="ex-prog">Rendering the ${what}… 0%</span></div>`]);
         try {
-          const out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, onProgress: (f) => { const el = document.getElementById('ex-prog'); if (el) el.textContent = `Rendering the redacted video… ${Math.round(f * 100)}%`; } });
+          const out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, clicks, onProgress: (f) => { const el = document.getElementById('ex-prog'); if (el) el.textContent = `Rendering the ${what}… ${Math.round(f * 100)}%`; } });
           if (out) {
             exportVideo = { ...video, blob: out.blob, durationMs: out.durationMs };
             exportVideoBytes = new Uint8Array(await out.blob.arrayBuffer());
@@ -481,6 +511,7 @@ async function detail(id: string): Promise<void> {
               model: mm, session: ev.session, events: keptEvents, shots: keptShots, video: exportVideo, keepPre, version: VERSION, extraFiles,
               videoBytes: exportVideo ? exportVideoBytes ?? new Uint8Array(await exportVideo.blob.arrayBuffer()) : undefined,
               videoEdits: edited ? { masks: edits.masks.length, cuts: edits.cuts.length } : undefined,
+              clickHighlights: !!exportVideoBytes && clicks.length > 0,
             });
           }
           const name = uniqueName(`${baseName()}.${f}`, used);

@@ -9,7 +9,7 @@ Privacy-first bug capture for enterprise web QA (Chrome Manifest V3). Implements
 * **Instant Replay** - the approved tab is captured into a bounded rolling buffer (default 90 s). *Save Last Replay* pins the window plus a post-trigger tail.
 * **Repro Session** - Start / Pause / Resume / Finish, optional 30 s Pre-session Context, named markers with asynchronous screenshots.
 * **Screenshot-only** mode, **Privacy Pause**, **AFK**, **Target Ended**, **Recovered Session**, each with an explicit visible state.
-* **Review** page: replay, raw timeline, draft steps from observed actions, report fields, export to HTML / TXT / Markdown / DOCX / XLSX / ZIP Evidence Package.
+* **Review** page: replay with click highlights (a ring where the user clicked, also in the exported video; the recording itself is unchanged), raw timeline, draft steps from observed actions, report fields, export to HTML / TXT / Markdown / DOCX / XLSX / ZIP Evidence Package.
 * **Privacy tools before anything leaves the device** - a screenshot editor (arrow, shapes, text, mosaic blur, black box; non-destructive) and video tools (time-ranged blur / black-box masks, cut-out ranges, exact-export preview). The stored evidence is never modified; the unredacted original is exported only on explicit request.
 * **Administrator policies** (managed storage; Group Policy / Intune / MDM / JSON): allowed and blocked sites, fixed capture settings, video off (Screenshot-only), export formats and confirmation, no unredacted originals, retention, sample switch. Guide: `docs/ADMIN_POLICY.md`; deployment files: `node scripts/gen-policy.mjs`.
 * **Sample sessions** (Settings -> Sample data): a pre-recorded run of the demo shop, labelled and removable, for trying everything without recording.

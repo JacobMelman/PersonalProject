@@ -9,7 +9,7 @@
     "build:e2e": "E2E=1 node build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "E2E=1 node build.mjs && node tests/e2e/run.mjs && node tests/e2e/exports.mjs && node tests/e2e/recovery.mjs && node tests/e2e/annotate.mjs && node tests/e2e/video-redact.mjs && node tests/e2e/sample.mjs && node tests/e2e/a11y.mjs && node tests/e2e/policy.mjs && node tests/e2e/static-shot.mjs && node tests/e2e/pause-gap.mjs",
+    "test:e2e": "E2E=1 node build.mjs && node tests/e2e/run.mjs && node tests/e2e/exports.mjs && node tests/e2e/recovery.mjs && node tests/e2e/annotate.mjs && node tests/e2e/video-redact.mjs && node tests/e2e/sample.mjs && node tests/e2e/a11y.mjs && node tests/e2e/policy.mjs && node tests/e2e/static-shot.mjs && node tests/e2e/pause-gap.mjs && node tests/e2e/click-marks.mjs",
     "package": "node scripts/package.mjs",
     "kit": "node scripts/make-kit.mjs",
     "demo": "node scripts/demo.mjs",

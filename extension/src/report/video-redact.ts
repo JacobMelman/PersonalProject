@@ -7,6 +7,7 @@ import { mosaic } from '../ui/annotate-render';
 import { activeMasks, afterCuts, inCut, normalizeCuts, type VideoEdits } from '../shared/video-edits';
 import { buildClock, wallToVideoMs, type VideoPause } from '../shared/video-clock';
 import { drawPauseCard } from './pause-card';
+import { clickTicks, drawClicks, type ClickMark } from '../shared/click-marks';
 
 export interface EditedVideo {
   blob: Blob;
@@ -22,7 +23,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function renderEditedVideo(
   sessionId: string,
   edits: VideoEdits,
-  opts: { fromWall?: number; bitrateKbps?: number; fps?: number; onProgress?: (fraction: number) => void } = {},
+  opts: { fromWall?: number; bitrateKbps?: number; fps?: number; clicks?: ClickMark[]; onProgress?: (fraction: number) => void } = {},
 ): Promise<EditedVideo | null> {
   const run = await selectRun(sessionId, opts.fromWall ?? 0);
   if (!run.length) return null;
@@ -31,8 +32,15 @@ export async function renderEditedVideo(
   const clock = buildClock(run); // same time base as the player: pauses are collapsed to a card
   let nextPause = 0;
   const cuts = normalizeCuts(edits.cuts);
-  const canvas = new OffscreenCanvas(W, H);
+  const canvas = new OffscreenCanvas(W, H); // what is encoded: the last decoded frame + masks + click highlights
   const ctx = canvas.getContext('2d', { willReadFrequently: false })!;
+  const raw = new OffscreenCanvas(W, H); // the last decoded frame as recorded
+  const rctx = raw.getContext('2d')!;
+  let hasRaw = false;
+  const marks = opts.clicks ?? [];
+  const ticks = clickTicks(marks);
+  let nextTick = 0;
+  let lastRel = -1e9;
 
   const cfg: VideoEncoderConfig = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1000, framerate: opts.fps ?? 15, latencyMode: 'quality', bitrateMode: 'variable' };
   if (!(await VideoEncoder.isConfigSupported(cfg)).supported) throw new Error(`The browser cannot encode ${first.codec}`);
@@ -59,25 +67,49 @@ export async function renderEditedVideo(
     endMs = outMs + durUs / 1000;
     frames++;
   };
+  // Every encoded frame is composed afresh, so a mask that starts between two recorded frames also covers the in-between ones.
+  const compose = (t: number) => {
+    ctx.drawImage(raw, 0, 0);
+    for (const m of activeMasks(edits.masks, t)) {
+      const x = Math.min(m.x1, m.x2) * W, y = Math.min(m.y1, m.y2) * H, w = Math.abs(m.x2 - m.x1) * W, h = Math.abs(m.y2 - m.y1) * H;
+      if (m.type === 'redact') { ctx.fillStyle = '#000'; ctx.fillRect(x, y, w, h); } else mosaic(ctx, canvas, x, y, w, h);
+    }
+    drawClicks(ctx, W, H, marks, t);
+  };
+  const inCard = (t: number) => clock.pauses.some((p) => t >= p.atMs && t < p.atMs + p.holdMs);
+  // A still page sends no frames, so a highlight needs frames of its own to animate and to disappear again.
+  const flushTicks = (until: number) => {
+    while (nextTick < ticks.length && ticks[nextTick] < until) {
+      const t = ticks[nextTick++];
+      if (!hasRaw || t <= lastRel || inCut(t, cuts) || inCard(t)) continue;
+      compose(t);
+      emit(afterCuts(t, cuts), Math.max(1, Math.min(ticks[nextTick] ?? until, until) - t) * 1000);
+      lastRel = t;
+    }
+  };
   const card = (p: VideoPause) => {
+    flushTicks(p.atMs);
     if (inCut(p.atMs, cuts)) return;
     drawPauseCard(ctx, W, H, p);
     emit(afterCuts(p.atMs, cuts), p.holdMs * 1000);
+    lastRel = p.atMs;
   };
 
+  let lastFrameEnd = 0;
   const decoder = new VideoDecoder({
     output: (frame) => {
       const relMs = wallToVideoMs(clock, frame.timestamp / 1000);
       while (nextPause < clock.pauses.length && relMs >= clock.pauses[nextPause].atMs + clock.pauses[nextPause].holdMs) card(clock.pauses[nextPause++]);
-      if (inCut(relMs, cuts)) { frame.close(); return; }
-      ctx.drawImage(frame, 0, 0, W, H);
+      flushTicks(relMs);
+      if (inCut(relMs, cuts)) { frame.close(); return; } // never kept, not even as the picture behind a later highlight
+      rctx.drawImage(frame, 0, 0, W, H);
+      hasRaw = true;
       const dur = frame.duration ?? 66_000;
       frame.close();
-      for (const m of activeMasks(edits.masks, relMs)) {
-        const x = Math.min(m.x1, m.x2) * W, y = Math.min(m.y1, m.y2) * H, w = Math.abs(m.x2 - m.x1) * W, h = Math.abs(m.y2 - m.y1) * H;
-        if (m.type === 'redact') { ctx.fillStyle = '#000'; ctx.fillRect(x, y, w, h); } else mosaic(ctx, canvas, x, y, w, h);
-      }
+      compose(relMs);
       emit(afterCuts(relMs, cuts), dur);
+      lastRel = relMs;
+      lastFrameEnd = relMs + dur / 1000;
     },
     error: (e) => { fatal = new Error(`Decoder: ${e.message}`); },
   });
@@ -94,6 +126,7 @@ export async function renderEditedVideo(
     }
   }
   await decoder.flush();
+  flushTicks(lastFrameEnd);
   await encoder.flush();
   decoder.close();
   encoder.close();

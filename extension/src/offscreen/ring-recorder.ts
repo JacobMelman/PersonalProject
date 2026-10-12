@@ -265,6 +265,28 @@ export class RingRecorder {
     await this.writeChain;
   }
 
+  /**
+   * Tab capture sends a frame only when the picture changes. Before a replay or a session is closed, the newest frame is
+   * repeated at this moment so the video reaches it: a still screen is shown as still, for as long as it really was, and
+   * events after the last change (a click on something that does not react) still fall inside the video.
+   */
+  holdLatest(): void {
+    const f = this.latest;
+    if (this.paused || !f || !this.encoder || this.encoder.state !== 'configured') return;
+    if (f.displayWidth - (f.displayWidth % 2) !== this.width || f.displayHeight - (f.displayHeight % 2) !== this.height) return;
+    const nowMs = Date.now();
+    if (nowMs * 1000 - this.lastEncodedUs < 1_000_000 / Math.max(1, this.settings.fps)) return;
+    const key = this.forceKey || nowMs - this.lastKeyMs >= GOP_MS;
+    if (key) {
+      this.lastKeyMs = nowMs;
+      this.forceKey = false;
+    }
+    const frame = new VideoFrame(f, { timestamp: nowMs * 1000 });
+    this.encoder.encode(frame, { keyFrame: key });
+    frame.close();
+    this.lastEncodedUs = nowMs * 1000;
+  }
+
   setPinSession(id: string | null): void {
     this.pinSession = id;
   }

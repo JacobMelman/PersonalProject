@@ -27,7 +27,7 @@ const stat = (png, fx, fy, fw, fh, dim) => {
 };
 
 try {
-  await setSettings({ replaySec: 40, tailSec: 0, preSessionSec: 0, openReviewAfterSave: false, markerScreenshot: false, fps: 10, bitrateKbps: 1500 });
+  await setSettings({ replaySec: 40, tailSec: 0, preSessionSec: 0, openReviewAfterSave: false, markerScreenshot: false, fps: 10, bitrateKbps: 1500, highlightClicks: false }); // highlights have their own test (click-marks)
   const page = await ctx.newPage();
   await page.goto(`http://localhost:${PORT}/`);
   await page.bringToFront();
