@@ -57,7 +57,7 @@ export async function launch(userData, opts = {}) {
     headless: process.env.HEADED !== '1',
     channel: 'chromium',
     args: [`--disable-extensions-except=${dist}`, `--load-extension=${dist}`, `--allowlisted-extension-id=${keyInfo.id}`, '--no-first-run', '--autoplay-policy=no-user-gesture-required'],
-    viewport: opts.viewport ?? { width: 1000, height: 700 },
+    viewport: 'viewport' in opts ? opts.viewport : { width: 1000, height: 700 }, // null = the real window size, no emulation
     acceptDownloads: true,
   });
   if (!ctx.serviceWorkers()[0]) await ctx.waitForEvent('serviceworker');

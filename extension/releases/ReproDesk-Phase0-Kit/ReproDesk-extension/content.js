@@ -142,6 +142,7 @@
           path: u.path,
           element: el,
           pos: { x: +(e.clientX / Math.max(innerWidth, 1)).toFixed(3), y: +(e.clientY / Math.max(innerHeight, 1)).toFixed(3) },
+          vp: { w: innerWidth, h: innerHeight },
           source: "chromium:dom",
           confidence: 0.97
         });

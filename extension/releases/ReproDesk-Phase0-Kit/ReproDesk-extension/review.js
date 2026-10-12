@@ -3234,12 +3234,42 @@ function sanitizeEdits(raw2, durationMs) {
   };
 }
 
+// src/shared/click-marks.ts
+var CLICK_MARK_MS = 800, COLOR = "255, 90, 78";
+function clickMarks(events, clock, durationMs, frame) {
+  let place = (e) => {
+    let { x: x3, y } = e.pos;
+    if (!frame || !e.vp || e.vp.w <= 0 || e.vp.h <= 0) return { x: x3, y };
+    let s = Math.min(frame.w / e.vp.w, frame.h / e.vp.h), cw = e.vp.w * s, ch = e.vp.h * s;
+    return { x: ((frame.w - cw) / 2 + x3 * cw) / frame.w, y: ((frame.h - ch) / 2 + y * ch) / frame.h };
+  };
+  return events.filter((e) => e.type === "click" && e.pos && !e.frame).map((e) => ({ atMs: wallToVideoMs(clock, e.ts), ...place(e) })).filter((m) => m.atMs >= 0 && m.atMs <= durationMs && m.x >= 0 && m.x <= 1 && m.y >= 0 && m.y <= 1).sort((a, b) => a.atMs - b.atMs);
+}
+function activeClicks(marks, tMs) {
+  return marks.filter((m) => tMs >= m.atMs && tMs < m.atMs + CLICK_MARK_MS);
+}
+function clickTicks(marks, stepMs = 80) {
+  let t = /* @__PURE__ */ new Set();
+  for (let m of marks) {
+    for (let s = 0; s < CLICK_MARK_MS; s += stepMs) t.add(Math.round(m.atMs + s));
+    t.add(Math.round(m.atMs + CLICK_MARK_MS));
+  }
+  return [...t].sort((a, b) => a - b);
+}
+function drawClicks(ctx, w, h, marks, tMs) {
+  let base = Math.max(16, Math.min(w, h) * 0.055);
+  for (let m of activeClicks(marks, tMs)) {
+    let k = (tMs - m.atMs) / CLICK_MARK_MS, x3 = m.x * w, y = m.y * h, fade = 1 - k, r = base * (0.6 + 1 * k);
+    ctx.save(), ctx.beginPath(), ctx.arc(x3, y, r, 0, Math.PI * 2), ctx.fillStyle = `rgba(${COLOR}, ${0.38 * fade})`, ctx.fill(), ctx.lineWidth = Math.max(2.5, base * 0.2), ctx.strokeStyle = `rgba(${COLOR}, ${0.95 * fade})`, ctx.stroke(), ctx.beginPath(), ctx.arc(x3, y, Math.max(2.5, base * 0.18), 0, Math.PI * 2), ctx.fillStyle = `rgba(${COLOR}, ${fade})`, ctx.fill(), ctx.restore();
+  }
+}
+
 // src/report/video-redact.ts
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function renderEditedVideo(sessionId2, edits, opts = {}) {
   let run = await selectRun(sessionId2, opts.fromWall ?? 0);
   if (!run.length) return null;
-  let first = run[0], W = first.width, H = first.height, clock = buildClock(run), nextPause = 0, cuts = normalizeCuts(edits.cuts), canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext("2d", { willReadFrequently: !1 }), cfg = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1e3, framerate: opts.fps ?? 15, latencyMode: "quality", bitrateMode: "variable" };
+  let first = run[0], W = first.width, H = first.height, clock = buildClock(run), nextPause = 0, cuts = normalizeCuts(edits.cuts), canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext("2d", { willReadFrequently: !1 }), raw2 = new OffscreenCanvas(W, H), rctx = raw2.getContext("2d"), hasRaw = !1, marks = opts.clicks ?? [], ticks = clickTicks(marks), nextTick = 0, lastRel = -1e9, cfg = { codec: first.codec, width: W, height: H, bitrate: (opts.bitrateKbps ?? 1500) * 1e3, framerate: opts.fps ?? 15, latencyMode: "quality", bitrateMode: "variable" };
   if (!(await VideoEncoder.isConfigSupported(cfg)).supported) throw new Error(`The browser cannot encode ${first.codec}`);
   let packets = [], frames = 0, lastKeyMs = -1e9, lastOutMs = -1e9, endMs = 0, fatal = null, encoder = new VideoEncoder({
     output: (chunk, meta) => {
@@ -3256,24 +3286,31 @@ async function renderEditedVideo(sessionId2, edits, opts = {}) {
     key && (lastKeyMs = outMs);
     let vf = new VideoFrame(canvas, { timestamp: Math.round(outMs * 1e3), duration: durUs });
     encoder.encode(vf, { keyFrame: key }), vf.close(), lastOutMs = outMs, endMs = outMs + durUs / 1e3, frames++;
+  }, compose = (t) => {
+    ctx.drawImage(raw2, 0, 0);
+    for (let m of activeMasks(edits.masks, t)) {
+      let x3 = Math.min(m.x1, m.x2) * W, y = Math.min(m.y1, m.y2) * H, w = Math.abs(m.x2 - m.x1) * W, h = Math.abs(m.y2 - m.y1) * H;
+      m.type === "redact" ? (ctx.fillStyle = "#000", ctx.fillRect(x3, y, w, h)) : mosaic(ctx, canvas, x3, y, w, h);
+    }
+    drawClicks(ctx, W, H, marks, t);
+  }, inCard = (t) => clock.pauses.some((p) => t >= p.atMs && t < p.atMs + p.holdMs), flushTicks = (until) => {
+    for (; nextTick < ticks.length && ticks[nextTick] < until; ) {
+      let t = ticks[nextTick++];
+      !hasRaw || t <= lastRel || inCut(t, cuts) || inCard(t) || (compose(t), emit(afterCuts(t, cuts), Math.max(1, Math.min(ticks[nextTick] ?? until, until) - t) * 1e3), lastRel = t);
+    }
   }, card = (p) => {
-    inCut(p.atMs, cuts) || (drawPauseCard(ctx, W, H, p), emit(afterCuts(p.atMs, cuts), p.holdMs * 1e3));
-  }, decoder = new VideoDecoder({
+    flushTicks(p.atMs), !inCut(p.atMs, cuts) && (drawPauseCard(ctx, W, H, p), emit(afterCuts(p.atMs, cuts), p.holdMs * 1e3), lastRel = p.atMs);
+  }, lastFrameEnd = 0, decoder = new VideoDecoder({
     output: (frame) => {
       let relMs = wallToVideoMs(clock, frame.timestamp / 1e3);
       for (; nextPause < clock.pauses.length && relMs >= clock.pauses[nextPause].atMs + clock.pauses[nextPause].holdMs; ) card(clock.pauses[nextPause++]);
-      if (inCut(relMs, cuts)) {
+      if (flushTicks(relMs), inCut(relMs, cuts)) {
         frame.close();
         return;
       }
-      ctx.drawImage(frame, 0, 0, W, H);
+      rctx.drawImage(frame, 0, 0, W, H), hasRaw = !0;
       let dur2 = frame.duration ?? 66e3;
-      frame.close();
-      for (let m of activeMasks(edits.masks, relMs)) {
-        let x3 = Math.min(m.x1, m.x2) * W, y = Math.min(m.y1, m.y2) * H, w = Math.abs(m.x2 - m.x1) * W, h = Math.abs(m.y2 - m.y1) * H;
-        m.type === "redact" ? (ctx.fillStyle = "#000", ctx.fillRect(x3, y, w, h)) : mosaic(ctx, canvas, x3, y, w, h);
-      }
-      emit(afterCuts(relMs, cuts), dur2);
+      frame.close(), compose(relMs), emit(afterCuts(relMs, cuts), dur2), lastRel = relMs, lastFrameEnd = relMs + dur2 / 1e3;
     },
     error: (e) => {
       fatal = new Error(`Decoder: ${e.message}`);
@@ -3287,7 +3324,7 @@ async function renderEditedVideo(sessionId2, edits, opts = {}) {
       for (decoder.decode(new EncodedVideoChunk({ type: c.key ? "key" : "delta", timestamp: c.timestampUs, duration: c.durationUs, data: c.data })); decoder.decodeQueueSize > 6 || encoder.encodeQueueSize > 12; ) await sleep(1);
       ++done2 % 30 === 0 && opts.onProgress?.(done2 / total);
     }
-  if (await decoder.flush(), await encoder.flush(), decoder.close(), encoder.close(), fatal) throw fatal;
+  if (await decoder.flush(), flushTicks(lastFrameEnd), await encoder.flush(), decoder.close(), encoder.close(), fatal) throw fatal;
   if (!packets.length) return null;
   let output = new Output({ format: new WebMOutputFormat(), target: new BufferTarget() }), source = new EncodedVideoPacketSource(first.codec.startsWith("vp09") ? "vp9" : "vp8");
   output.addVideoTrack(source), await output.start();
@@ -21535,7 +21572,7 @@ async function buildEvidencePackage(inp) {
     end: session.endedAt ? new Date(session.endedAt).toISOString() : null,
     last_committed: session.lastCommittedAt ? new Date(session.lastCommittedAt).toISOString() : null,
     pre_session_context: session.preContext ? { present: !0, kept: inp.keepPre, seconds: Math.round((session.preContext.endWall - session.preContext.startWall) / 1e3) } : { present: !1 },
-    video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, pauses_not_recorded: video.clock.pauses.map((p) => ({ from_wall_ms: p.fromWall, to_wall_ms: p.toWall, reason: p.reason ?? null, shown_at_ms: Math.round(p.atMs), shown_for_ms: p.holdMs })), redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : !1 } : null,
+    video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, pauses_not_recorded: video.clock.pauses.map((p) => ({ from_wall_ms: p.fromWall, to_wall_ms: p.toWall, reason: p.reason ?? null, shown_at_ms: Math.round(p.atMs), shown_for_ms: p.holdMs })), redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : !1, click_highlights: !!inp.clickHighlights } : null,
     screenshots: shots.map((sh) => ({ id: sh.id, annotated: (sh.annotations?.length ?? 0) > 0, redacted: hasRedaction(sh.annotations), original_included: Object.keys(inp.extraFiles ?? {}).some((k) => k.startsWith("screenshots/originals/") && k.includes(sh.id)) })),
     notes: "sha256 values are integrity metadata only, not a claim of forensic chain-of-custody. Redacted screenshots are exported flattened; originals are included only when the exporter asked for them.",
     artifacts
@@ -23177,6 +23214,22 @@ async function openEditor(input) {
   addEventListener("keydown", onKey, !0), redraw();
 }
 
+// src/shared/types.ts
+var DEFAULT_SETTINGS = {
+  replaySec: 90,
+  tailSec: 5,
+  preSessionSec: 30,
+  fps: 15,
+  bitrateKbps: 1500,
+  afkMinutes: 10,
+  markerScreenshot: !0,
+  captureVideo: !0,
+  openReviewAfterSave: !0,
+  highlightClicks: !0,
+  approvedOrigins: [],
+  environment: "QA"
+};
+
 // src/shared/policy.ts
 var EXPORT_FORMATS = ["zip", "html", "docx", "xlsx", "txt", "md"], NO_POLICY = {
   managed: !1,
@@ -23217,6 +23270,15 @@ function parsePolicy(raw2) {
   };
   return p.managed = Object.keys(r).some((k) => r[k] !== void 0 && r[k] !== null), p;
 }
+function applyPolicy(settings, policy) {
+  return policy.managed ? { ...settings, ...policy.settings, approvedOrigins: [.../* @__PURE__ */ new Set([...settings.approvedOrigins, ...policy.approvedOrigins])] } : settings;
+}
+var lockedKeys = (policy) => Object.keys(policy.settings);
+function stripLocked(patch, policy) {
+  let out = { ...patch };
+  for (let k of lockedKeys(policy)) delete out[k];
+  return out;
+}
 var allowedFormats = (policy) => policy.allowedExportFormats ?? EXPORT_FORMATS;
 
 // src/shared/settings.ts
@@ -23226,6 +23288,14 @@ async function getPolicy() {
   } catch {
     return NO_POLICY;
   }
+}
+async function getSettings() {
+  let r = await chrome.storage.local.get("settings"), own = { ...DEFAULT_SETTINGS, ...r.settings ?? {} };
+  return applyPolicy(own, await getPolicy());
+}
+async function saveSettings(patch) {
+  let policy = await getPolicy(), r = await chrome.storage.local.get("settings"), own = { ...DEFAULT_SETTINGS, ...r.settings ?? {} }, clean = stripLocked(patch, policy);
+  return clean.approvedOrigins && (clean.approvedOrigins = clean.approvedOrigins.filter((o) => !policy.approvedOrigins.includes(o))), await chrome.storage.local.set({ settings: { ...own, ...clean } }), getSettings();
 }
 
 // src/review/index.ts
@@ -23253,7 +23323,7 @@ async function detail(id) {
   }
   let ev = loaded, policy = await getPolicy(), okFormats = allowedFormats(policy), formats = FORMATS.filter((f) => okFormats.includes(f.id)), confirmExport = () => !policy.requireExportConfirmation || confirm(`Your organization asks you to confirm before exporting.
 
-Video and screenshots can show sensitive values that were visible in the tested application. Have you checked the evidence and hidden what must not leave this device?`), keepPre = ev.session.preContext?.kept ?? !0, video = null, videoUrl = "", videoErr = "", exportNote = "", edits = sanitizeEdits(ev.session.videoEdits, 24 * 3600 * 1e3), previewing = !1, previewUrl = "", maskDraft = null, buildVideo = async () => {
+Video and screenshots can show sensitive values that were visible in the tested application. Have you checked the evidence and hidden what must not leave this device?`), keepPre = ev.session.preContext?.kept ?? !0, video = null, videoUrl = "", videoErr = "", exportNote = "", edits = sanitizeEdits(ev.session.videoEdits, 24 * 3600 * 1e3), previewing = !1, previewUrl = "", maskDraft = null, showClicks = (await getSettings()).highlightClicks !== !1, marks = () => video ? clickMarks(ev.events, video.clock, video.durationMs, { w: video.width, h: video.height }) : [], buildVideo = async () => {
     videoUrl && URL.revokeObjectURL(videoUrl), video = null, videoUrl = "";
     try {
       let pre = ev.session.preContext;
@@ -23292,7 +23362,7 @@ Video and screenshots can show sensitive values that were visible in the tested 
     </div>
     <div class="grid2"><div class="col">
       <section class="card panelcard"><h2>${icon("film")}Replay</h2>
-        ${video ? `<div class="player"><div class="stage" id="stage"><video id="vid" controls playsinline src="${videoUrl}"></video><div class="vover" id="vover"></div></div><div class="player__bar"><span>${icon("video")} ${video.codec.startsWith("vp09") ? "VP9" : "VP8"} \xB7 ${video.segments} GOP segments${video.gaps.length ? ` \xB7 ${video.gaps.length} capture gap${video.gaps.length > 1 ? "s" : ""} (pauses)` : ""}</span><span style="margin-left:auto">Click a timeline row to jump</span></div></div>
+        ${video ? `<div class="player"><div class="stage" id="stage"><video id="vid" controls playsinline src="${videoUrl}"></video><div class="vover" id="vover"></div><canvas class="vclicks" id="vclicks" aria-hidden="true"></canvas></div><div class="player__bar"><span>${icon("video")} ${video.codec.startsWith("vp09") ? "VP9" : "VP8"} \xB7 ${video.segments} GOP segments${video.gaps.length ? ` \xB7 ${video.gaps.length} capture gap${video.gaps.length > 1 ? "s" : ""} (pauses)` : ""}</span><label class="hlclicks" style="margin-left:auto"><input type="checkbox" id="hlclicks" ${showClicks ? "checked" : ""}> Highlight clicks</label><span>Click a timeline row to jump</span></div></div>
         <div class="ptools" id="ptools"><div class="ptools__head">${icon("shield-alert")}<b>Privacy tools</b><span class="faint small">hide sensitive pixels before export</span></div>
           <div class="ptools__btns"><button class="btn sm" id="pt-mask">${icon("grid-3x3")}Mask a region</button><button class="btn sm" id="pt-cut">${icon("scissors")}Cut out a range</button><button class="btn sm" id="pt-preview">${icon("eye-off")}Preview redacted</button></div>
           <div id="pt-form"></div><ul class="pt-list" id="pt-list"></ul></div>` : `<div class="novideo">${icon("film")}<b>No video available</b><span>${esc2(s.videoFailure ?? videoErr ?? "This session has no video.")}</span></div>`}
@@ -23347,8 +23417,24 @@ Video and screenshots can show sensitive values that were visible in the tested 
   }
   function wirePrivacy(vid) {
     if (!document.getElementById("ptools") || !vid || !video) return;
-    let stage = document.getElementById("stage"), over = document.getElementById("vover"), form = document.getElementById("pt-form"), list2 = document.getElementById("pt-list"), dur2 = video.durationMs, nowMs = () => Math.round(vid.currentTime * 1e3), pct = (v) => `${Math.round(v * 100)}%`, paintOverlay = () => {
-      if (over.innerHTML = "", previewing) return;
+    let stage = document.getElementById("stage"), over = document.getElementById("vover"), form = document.getElementById("pt-form"), list2 = document.getElementById("pt-list"), dur2 = video.durationMs, nowMs = () => Math.round(vid.currentTime * 1e3), pct = (v) => `${Math.round(v * 100)}%`, cv = document.getElementById("vclicks"), clickMarksNow = marks(), paintClicks = () => {
+      if (!cv) return;
+      let c = contentRect(vid), dpr = devicePixelRatio || 1;
+      cv.style.cssText = `left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px`;
+      let w = Math.max(1, Math.round(c.w * dpr)), h = Math.max(1, Math.round(c.h * dpr));
+      (cv.width !== w || cv.height !== h) && (cv.width = w, cv.height = h);
+      let g = cv.getContext("2d");
+      g.clearRect(0, 0, w, h), showClicks && !previewing && drawClicks(g, w, h, clickMarksNow, vid.currentTime * 1e3);
+    }, raf = 0, loop = () => {
+      paintClicks(), raf = vid.paused || vid.ended ? 0 : requestAnimationFrame(loop);
+    };
+    vid.addEventListener("play", () => {
+      raf || (raf = requestAnimationFrame(loop));
+    }), document.getElementById("hlclicks")?.addEventListener("change", (e) => {
+      showClicks = e.target.checked, saveSettings({ highlightClicks: showClicks }), previewing && document.getElementById("pt-preview")?.click(), paintOverlay();
+    });
+    let paintOverlay = () => {
+      if (over.innerHTML = "", clickMarksNow = marks(), paintClicks(), previewing) return;
       let c = contentRect(vid), t = nowMs();
       for (let m of activeMasks(edits.masks, t)) {
         let d = document.createElement("div");
@@ -23419,7 +23505,7 @@ Video and screenshots can show sensitive values that were visible in the tested 
         return previewing = !1, vid.src = videoUrl, document.getElementById("pt-preview").innerHTML = `${icon("eye-off")}Preview redacted`, form.innerHTML = "", refresh();
       form.innerHTML = '<div class="ptform"><span class="faint small" id="pt-prog">Rendering the redacted copy\u2026 0%</span></div>';
       try {
-        let out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, onProgress: (f) => {
+        let out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, clicks: showClicks ? marks() : [], onProgress: (f) => {
           let el = document.getElementById("pt-prog");
           el && (el.textContent = `Rendering the redacted copy\u2026 ${Math.round(f * 100)}%`);
         } });
@@ -23493,13 +23579,14 @@ Video and screenshots can show sensitive values that were visible in the tested 
       copy("txt");
     }), document.getElementById("export")?.addEventListener("click", async () => {
       if (!confirmExport()) return;
-      let cutsN = normalizeCuts(edits.cuts), edited = hasEdits(edits) && !!video, keptEvents = edited && video ? ev.events.filter((e) => !inCut(wallToVideoMs(video.clock, e.ts), cutsN)) : ev.events, keptShots = edited && video ? ev.shots.filter((s2) => !inCut(wallToVideoMs(video.clock, s2.ts), cutsN)) : ev.shots, exportVideo = video, exportVideoBytes;
-      if (edited && video && document.querySelector('[data-fmt="zip"]')?.checked) {
-        setStatus([`<div class="r">${icon("refresh-cw")}<span id="ex-prog">Rendering the redacted video\u2026 0%</span></div>`]);
+      let cutsN = normalizeCuts(edits.cuts), edited = hasEdits(edits) && !!video, keptEvents = edited && video ? ev.events.filter((e) => !inCut(wallToVideoMs(video.clock, e.ts), cutsN)) : ev.events, keptShots = edited && video ? ev.shots.filter((s2) => !inCut(wallToVideoMs(video.clock, s2.ts), cutsN)) : ev.shots, exportVideo = video, exportVideoBytes, clicks = showClicks ? marks() : [];
+      if ((edited || clicks.length) && video && document.querySelector('[data-fmt="zip"]')?.checked) {
+        let what = edited ? "redacted video" : "video with click highlights";
+        setStatus([`<div class="r">${icon("refresh-cw")}<span id="ex-prog">Rendering the ${what}\u2026 0%</span></div>`]);
         try {
-          let out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, onProgress: (f) => {
+          let out = await renderEditedVideo(id, edits, { fromWall: !keepPre && ev.session.preContext ? ev.session.startedAt : 0, bitrateKbps: ev.session.settingsSnapshot.bitrateKbps, fps: ev.session.settingsSnapshot.fps, clicks, onProgress: (f) => {
             let el = document.getElementById("ex-prog");
-            el && (el.textContent = `Rendering the redacted video\u2026 ${Math.round(f * 100)}%`);
+            el && (el.textContent = `Rendering the ${what}\u2026 ${Math.round(f * 100)}%`);
           } });
           out && (exportVideo = { ...video, blob: out.blob, durationMs: out.durationMs }, exportVideoBytes = new Uint8Array(await out.blob.arrayBuffer()));
         } catch (err2) {
@@ -23534,7 +23621,8 @@ Video and screenshots can show sensitive values that were visible in the tested 
               version: VERSION2,
               extraFiles,
               videoBytes: exportVideo ? exportVideoBytes ?? new Uint8Array(await exportVideo.blob.arrayBuffer()) : void 0,
-              videoEdits: edited ? { masks: edits.masks.length, cuts: edits.cuts.length } : void 0
+              videoEdits: edited ? { masks: edits.masks.length, cuts: edits.cuts.length } : void 0,
+              clickHighlights: !!exportVideoBytes && clicks.length > 0
             });
           }
           let name = uniqueName(`${baseName()}.${f}`, used);

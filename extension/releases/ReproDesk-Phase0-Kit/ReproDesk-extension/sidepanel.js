@@ -9,6 +9,7 @@ var DEFAULT_SETTINGS = {
   markerScreenshot: !0,
   captureVideo: !0,
   openReviewAfterSave: !0,
+  highlightClicks: !0,
   approvedOrigins: [],
   environment: "QA"
 };

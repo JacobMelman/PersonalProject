@@ -13,7 +13,11 @@ const server = await startSite(PORT);
 const rep = newReporter();
 const ok = rep.ok;
 const userData = tmpProfile();
-const { ctx, rd, setSettings, dump, until, activeTabId } = await launch(userData);
+// No viewport emulation: an emulated viewport is taller than the window's real surface (the browser's own bars take 138 px),
+// and the capture then crops or letterboxes the page unpredictably, which a real window never does. Without emulation the
+// automation info bar shifts Playwright's mouse by its height, so the click is dispatched on the target itself (the content
+// script treats it like any click). The mapping through letterbox bars is covered by the unit tests.
+const { ctx, rd, setSettings, dump, until, activeTabId } = await launch(userData, { viewport: null });
 const out = mkdtempSync(path.join(tmpdir(), 'rd-clicks-'));
 
 // Centroid of the pixels matching `test` in a frame, via ImageMagick's text dump (small frames, fine for a test).
@@ -27,7 +31,7 @@ const centroid = (png, test) => {
   return n ? { n, x: sx / n, y: sy / n } : { n: 0 };
 };
 const isRed = (r, g, b) => r > 190 && g < 140 && b < 140 && r - g > 80;
-const isTarget = (r, g, b) => b > 170 && r < 70 && g < 90; // blue: never confused with letterbox bars
+const isTarget = (r, g, b) => b > 140 && b - r > 50 && b - g > 80; // blue (VP9 softens it): never confused with bars or the ring
 const frameAt = (webm, t, name) => { const p = path.join(out, name); execFileSync('ffmpeg', ['-v', 'error', '-y', '-ss', String(Math.max(0, t)), '-i', webm, '-frames:v', '1', p]); return p; };
 
 try {
@@ -36,18 +40,24 @@ try {
   await page.goto(`http://localhost:${PORT}/popup.html`);
   await page.bringToFront();
   // a still, grey page with one small blue target: nothing on it changes when it is clicked
-  const target = await page.evaluate(() => {
+  await page.evaluate(() => {
     const bg = document.createElement('div');
     bg.style.cssText = 'position:fixed;inset:0;background:rgb(128,128,128);z-index:99998';
     const t = document.createElement('div');
-    t.style.cssText = 'position:fixed;left:68%;top:38%;width:26px;height:26px;background:rgb(20,40,230);z-index:99999';
+    t.id = '__target';
+    t.style.cssText = 'position:fixed;left:68%;top:38%;width:12px;height:12px;background:rgb(20,40,230);z-index:99999';
     document.body.append(bg, t);
-    const r = t.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, vw: innerWidth, vh: innerHeight };
   });
   await rd((id) => self.__rd.armTab(id), await activeTabId());
   await sleep(3500);
-  await page.mouse.click(target.x, target.y);
+  // measured at the moment of the click: starting the capture can change the window's height (a sharing bar appears)
+  const target = await page.evaluate(() => {
+    const el = document.getElementById('__target');
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) el.dispatchEvent(new MouseEvent(type, { bubbles: true, composed: true, clientX: x, clientY: y, button: 0 }));
+    return { x, y, vw: innerWidth, vh: innerHeight };
+  });
   await sleep(3500);
   await rd(() => self.__rd.saveReplay());
   const sess = await until(async () => (await dump('sessions')).find((s) => s.kind === 'instant' && s.status !== 'active'), 20000);
@@ -68,6 +78,7 @@ try {
   // where the ring belongs in the picture: the viewport fitted into the frame (Chrome adds bars when their shapes differ)
   const fw = await rv.evaluate(() => document.getElementById('vid').videoWidth), fh = await rv.evaluate(() => document.getElementById('vid').videoHeight);
   const s = Math.min(fw / click.vp.w, fh / click.vp.h);
+  console.log(`video ${fw}x${fh}, viewport ${click.vp.w}x${click.vp.h}`);
   const want = { x: ((fw - click.vp.w * s) / 2 + click.pos.x * click.vp.w * s) / fw, y: ((fh - click.vp.h * s) / 2 + click.pos.y * click.vp.h * s) / fh };
   const overlayAt = (t) => rv.evaluate(async ({ t, x, y }) => {
     const v = document.getElementById('vid');
@@ -100,7 +111,8 @@ try {
 
   const on = await exportZip('on.zip');
   ok('the manifest says the exported video shows click highlights', on.manifest.video?.click_highlights === true);
-  const tgt = centroid(frameAt(on.webm, clickT - 0.8, 'before.png'), isTarget);
+  // a still page has few frames and ffmpeg returns the first frame at or after the seek point: take the very first one
+  const tgt = centroid(frameAt(on.webm, 0, 'before.png'), isTarget);
   const ring = centroid(frameAt(on.webm, clickT + 0.25, 'during.png'), isRed);
   const gone = centroid(frameAt(on.webm, clickT + 1.6, 'after.png'), isRed);
   const dist = tgt.n && ring.n ? Math.hypot(tgt.x - ring.x, tgt.y - ring.y) : Infinity;

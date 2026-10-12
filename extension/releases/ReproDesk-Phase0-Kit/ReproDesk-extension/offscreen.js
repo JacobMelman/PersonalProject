@@ -292,6 +292,21 @@ var GOP_MS = 2e3, CODEC_CANDIDATES = ["vp09.00.10.08", "vp8"], RingRecorder = cl
       }
     this.closeGop(), this.forceKey = !0, await this.writeChain;
   }
+  /**
+   * Tab capture sends a frame only when the picture changes. Before a replay or a session is closed, the newest frame is
+   * repeated at this moment so the video reaches it: a still screen is shown as still, for as long as it really was, and
+   * events after the last change (a click on something that does not react) still fall inside the video.
+   */
+  holdLatest() {
+    let f = this.latest;
+    if (this.paused || !f || !this.encoder || this.encoder.state !== "configured" || f.displayWidth - f.displayWidth % 2 !== this.width || f.displayHeight - f.displayHeight % 2 !== this.height) return;
+    let nowMs = Date.now();
+    if (nowMs * 1e3 - this.lastEncodedUs < 1e6 / Math.max(1, this.settings.fps)) return;
+    let key = this.forceKey || nowMs - this.lastKeyMs >= GOP_MS;
+    key && (this.lastKeyMs = nowMs, this.forceKey = !1);
+    let frame = new VideoFrame(f, { timestamp: nowMs * 1e3 });
+    this.encoder.encode(frame, { keyFrame: key }), frame.close(), this.lastEncodedUs = nowMs * 1e3;
+  }
   setPinSession(id) {
     this.pinSession = id;
   }
@@ -365,7 +380,7 @@ async function handle(op) {
     case "flush":
       return await recorder?.flushNow(), { ok: !0 };
     case "save-replay": {
-      op.tailMs > 0 && recorder && !recorder.paused && await sleep(op.tailMs), await recorder?.flushNow();
+      op.tailMs > 0 && recorder && !recorder.paused && await sleep(op.tailMs), recorder?.holdLatest(), await recorder?.flushNow();
       let tailEnd = Date.now(), segs = await pinWindow(op.sessionId, op.triggerWall, op.preMs, tailEnd);
       return {
         ok: segs.length > 0,
@@ -383,7 +398,7 @@ async function handle(op) {
     case "screenshot":
       return recorder ? recorder.grabScreenshot(op.file) : { ok: !1, error: "no capture stream" };
     case "pin-stop":
-      return await recorder?.flushNow(), recorder?.setPinSession(null), { ok: !0 };
+      return recorder?.holdLatest(), await recorder?.flushNow(), recorder?.setPinSession(null), { ok: !0 };
   }
 }
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => msg?.kind !== "off" ? !1 : (handle(msg).then(

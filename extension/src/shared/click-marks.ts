@@ -53,21 +53,21 @@ export function clickTicks(marks: ClickMark[], stepMs = 80): number[] {
 
 /** Draws the highlights visible at `tMs` on a canvas the size of the video frame (or of the player's picture). */
 export function drawClicks(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, w: number, h: number, marks: ClickMark[], tMs: number): void {
-  const base = Math.max(10, Math.min(w, h) * 0.03);
+  const base = Math.max(16, Math.min(w, h) * 0.055);
   for (const m of activeClicks(marks, tMs)) {
     const k = (tMs - m.atMs) / CLICK_MARK_MS; // 0 -> 1
     const x = m.x * w, y = m.y * h, fade = 1 - k;
-    const r = base * (0.55 + 1.1 * k);
+    const r = base * (0.6 + 1.0 * k);
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${COLOR}, ${0.3 * fade})`;
+    ctx.fillStyle = `rgba(${COLOR}, ${0.38 * fade})`;
     ctx.fill();
-    ctx.lineWidth = Math.max(2, base * 0.18);
+    ctx.lineWidth = Math.max(2.5, base * 0.2);
     ctx.strokeStyle = `rgba(${COLOR}, ${0.95 * fade})`;
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(x, y, Math.max(2, base * 0.2), 0, Math.PI * 2);
+    ctx.arc(x, y, Math.max(2.5, base * 0.18), 0, Math.PI * 2);
     ctx.fillStyle = `rgba(${COLOR}, ${fade})`;
     ctx.fill();
     ctx.restore();
