@@ -361,8 +361,8 @@ try {
     await ripple(rv);
     const c = await rectOf(rv, '#ed-canvas');
     const pad = 0.012;
-    await clickEl(rv, tabOff, '[data-tool="blur"]');
-    for (const b of [boxes.card, boxes.exp]) { await drag(pointAt(tabOff, c, b[0] - pad, b[1] - pad * 1.4), pointAt(tabOff, c, b[2] + pad, b[3] + pad * 1.4)); await beat(400); }
+    // the editor goes back to the select tool after each shape, so pick Blur for each box
+    for (const b of [boxes.card, boxes.exp]) { await clickEl(rv, tabOff, '[data-tool="blur"]'); await drag(pointAt(tabOff, c, b[0] - pad, b[1] - pad * 1.4), pointAt(tabOff, c, b[2] + pad, b[3] + pad * 1.4)); await beat(400); }
     await beat(300);
     await clickEl(rv, tabOff, '[data-tool="rect"]');
     await drag(pointAt(tabOff, c, boxes.err[0] - pad, boxes.err[1] - pad), pointAt(tabOff, c, boxes.err[2] + pad, boxes.err[3] + pad));
