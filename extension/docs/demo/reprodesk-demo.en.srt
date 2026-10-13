@@ -1,263 +1,262 @@
 1
-00:00:01,337 --> 00:00:02,887
+00:00:01,887 --> 00:00:03,392
 This is ReproDesk.
 
 2
-00:00:02,927 --> 00:00:06,844
+00:00:03,432 --> 00:00:07,423
 It captures a bug once,
 and gives developers the evidence.
 
 3
-00:00:06,884 --> 00:00:08,781
+00:00:07,463 --> 00:00:09,359
 Our demo app is Northwind Gear:
 
 4
-00:00:08,821 --> 00:00:11,409
+00:00:09,399 --> 00:00:12,064
 a web shop with two deliberate bugs.
 
 5
-00:00:13,111 --> 00:00:17,290
+00:00:13,601 --> 00:00:17,755
 One click on the toolbar icon
 arms ReproDesk for this tab only.
 
 6
-00:00:17,330 --> 00:00:21,507
+00:00:17,795 --> 00:00:22,055
 Chrome requires that explicit click,
 so nothing ever records silently.
 
 7
-00:00:21,547 --> 00:00:22,904
+00:00:22,095 --> 00:00:23,486
 Now it is armed.
 
 8
-00:00:22,944 --> 00:00:27,260
+00:00:23,526 --> 00:00:27,821
 A rolling buffer keeps only the last 90 seconds,
 on this computer.
 
 9
-00:00:27,300 --> 00:00:30,981
+00:00:27,861 --> 00:00:31,591
 No keystrokes are collected,
 and only this tab is recorded.
 
 10
-00:00:31,021 --> 00:00:32,387
+00:00:31,631 --> 00:00:32,992
 Test as usual.
 
 11
-00:00:32,427 --> 00:00:36,097
+00:00:33,032 --> 00:00:36,697
 ReproDesk quietly keeps the
 latest moments in its buffer.
 
 12
-00:00:42,138 --> 00:00:43,528
+00:00:42,669 --> 00:00:44,054
 Something looked wrong?
 
 13
-00:00:43,568 --> 00:00:46,359
+00:00:44,094 --> 00:00:46,876
 Save last replay keeps what just happened.
 
 14
-00:00:46,399 --> 00:00:50,496
+00:00:46,916 --> 00:00:50,896
 Shortcut: Alt+Shift+R.
 No need to reproduce it.
 
 15
-00:00:50,536 --> 00:00:53,465
+00:00:50,936 --> 00:00:53,900
 For a known bug, start a Repro Session.
 
 16
-00:00:53,505 --> 00:00:55,956
+00:00:53,940 --> 00:00:56,380
 It records everything from Start to Finish,
 
 17
-00:00:55,996 --> 00:01:00,588
+00:00:56,420 --> 00:01:01,213
 plus the 30 seconds before Start:
 only while Armed, and only from this tab.
 
 18
-00:01:00,628 --> 00:01:03,733
+00:01:01,253 --> 00:01:04,343
 Bug 1:
 the promo code SUMMER20 shows a discount,
 
 19
-00:01:03,773 --> 00:01:05,753
+00:01:04,383 --> 00:01:06,379
 but the total does not change.
 
 20
-00:01:06,164 --> 00:01:08,256
+00:01:06,808 --> 00:01:08,924
 Add a marker to flag this moment.
 
 21
-00:01:08,296 --> 00:01:10,720
+00:01:08,964 --> 00:01:11,414
 A screenshot is taken automatically.
 
 22
-00:01:11,157 --> 00:01:12,719
+00:01:11,758 --> 00:01:13,257
 Now the checkout form.
 
 23
-00:01:12,759 --> 00:01:15,221
+00:01:13,297 --> 00:01:15,793
 Typed text is never stored as events.
 
 24
-00:01:15,261 --> 00:01:17,409
+00:01:15,833 --> 00:01:17,958
 The video does show pixels, though,
 
 25
-00:01:17,449 --> 00:01:20,322
+00:01:17,998 --> 00:01:20,932
 so we will hide sensitive
 values before sharing.
 
 26
-00:01:24,419 --> 00:01:28,856
+00:01:25,139 --> 00:01:29,717
 Bug 2: Place order fails with error E-4021.
 
 27
-00:01:32,134 --> 00:01:35,596
+00:01:32,912 --> 00:01:36,410
 If you look at another tab,
 recording pauses by itself.
 
 28
-00:01:35,636 --> 00:01:38,057
+00:01:36,450 --> 00:01:38,878
 Nothing from other tabs is ever stored.
 
 29
-00:01:38,097 --> 00:01:40,838
+00:01:38,918 --> 00:01:41,736
 Back on the approved tab, capture resumes.
 
 30
-00:01:40,878 --> 00:01:44,509
+00:01:41,776 --> 00:01:45,539
 Finish & review stops the
 recording and opens the report.
 
 31
-00:01:47,083 --> 00:01:50,119
+00:01:47,807 --> 00:01:50,835
 Here is the report:
 the video, a live timeline,
 
 32
-00:01:50,159 --> 00:01:53,943
+00:01:50,875 --> 00:01:54,697
 and steps drafted from what really happened.
 No AI guesses.
 
 33
-00:01:53,983 --> 00:01:56,894
+00:01:54,737 --> 00:01:57,639
 Click any row of the timeline
 to jump to that moment.
 
 34
-00:01:58,484 --> 00:02:01,552
+00:01:59,048 --> 00:02:02,104
 In the replay,
 a red ring shows what was clicked.
 
 35
-00:02:01,592 --> 00:02:05,589
+00:02:02,144 --> 00:02:06,201
 It is in the exported video too,
 and one checkbox turns it off.
 
 36
-00:02:05,629 --> 00:02:08,620
+00:02:06,241 --> 00:02:09,239
 Where capture was paused,
 the replay says so:
 
 37
-00:02:08,660 --> 00:02:12,616
+00:02:09,279 --> 00:02:13,264
 a short card instead of the time away.
 Nothing was recorded there.
 
 38
-00:02:13,402 --> 00:02:17,148
+00:02:14,049 --> 00:02:17,886
 Steps can be renamed in your own words,
 like the code you typed.
 
 39
-00:02:17,188 --> 00:02:19,805
+00:02:17,926 --> 00:02:20,603
 The recorded action stays right under it.
 
 40
-00:02:20,590 --> 00:02:23,109
+00:02:21,386 --> 00:02:23,917
 Before sharing, hide sensitive data.
 
 41
-00:02:23,149 --> 00:02:27,201
-Open a screenshot, blur the card number,
+00:02:23,957 --> 00:02:28,041
+Open a screenshot, blur the card details,
 and box the error.
 
 42
-00:02:32,428 --> 00:02:35,190
+00:02:33,180 --> 00:02:35,955
 The original screenshot is never modified.
 
 43
-00:02:35,230 --> 00:02:38,100
+00:02:35,995 --> 00:02:38,826
 Only the exported copy carries the blur.
 
 44
-00:02:39,014 --> 00:02:43,452
+00:02:39,736 --> 00:02:44,056
 Now the video. First, jump to a moment
 where the card number is on screen.
 
 45
-00:02:43,492 --> 00:02:45,770
-Drag a box over the card field.
+00:02:44,096 --> 00:02:46,551
+Drag a box over the card details.
 
 46
-00:02:45,810 --> 00:02:49,539
-Blur it from the moment the number
+00:02:46,591 --> 00:02:50,459
+Blur them from the moment the number
 is typed until the error appears.
 
 47
-00:02:57,295 --> 00:02:59,546
+00:02:57,670 --> 00:02:59,949
 The error message pushes the form down,
 
 48
-00:02:59,586 --> 00:03:03,030
-so a second mask covers
-the field until the end.
+00:02:59,989 --> 00:03:03,074
+so a second mask covers them until the end.
 
 49
-00:03:08,591 --> 00:03:11,624
+00:03:08,697 --> 00:03:11,676
 The preview shows exactly
 what will be exported.
 
 50
-00:03:21,478 --> 00:03:24,840
-Now the card number is hidden in
-every frame where it appears.
+00:03:17,018 --> 00:03:20,530
+Now the card details are hidden
+in every frame where they appear.
 
 51
-00:03:32,552 --> 00:03:35,377
+00:03:28,228 --> 00:03:31,071
 Describe what happened,
 and what you expected.
 
 52
-00:03:35,417 --> 00:03:38,261
+00:03:31,111 --> 00:03:34,037
 The expected result is
 always written by you.
 
 53
-00:03:40,143 --> 00:03:45,867
+00:03:35,743 --> 00:03:41,488
 One click exports an Evidence Package,
 an HTML report and a Word document.
 
 54
-00:03:53,237 --> 00:03:57,689
+00:03:45,307 --> 00:03:49,833
 The HTML report is self-contained,
 with the blurred screenshots,
 
 55
-00:03:57,729 --> 00:04:00,157
+00:03:49,873 --> 00:03:52,331
 so developers can open it anywhere.
 
 56
-00:04:00,473 --> 00:04:03,572
+00:03:52,536 --> 00:03:55,663
 Everything stays on this
 device until you export it.
 
 57
-00:04:03,612 --> 00:04:08,479
+00:03:55,703 --> 00:04:00,419
 Administrators can lock settings and restrict
 sites with standard browser policies.
 
 58
-00:04:08,519 --> 00:04:11,486
+00:04:00,459 --> 00:04:03,381
 ReproDesk: evidence instead of retelling.

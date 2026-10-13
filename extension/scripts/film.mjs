@@ -87,6 +87,9 @@ const vt = () => (Date.now() - recStartWall) / 1000;
 const PACE = Number(process.env.FILM_PACE ?? 0.78); // < 1 = brisker pauses, cursor moves and typing
 const beat = (ms) => sleep(ms * PACE);
 const timeline = {};
+/** Waits on the app with nothing said (the redacted preview and the export rendering): played faster in the cut. */
+const fast = [];
+const fastWindow = (a, b) => { if (b - a > 1) fast.push([a, b]); };
 /** One narrated scene: the voice starts with the scene, the scene lasts at least as long as its narration (+ a breath). */
 async function scene(id, fn, extra = 0.35) {
   if (!VOICE[id]) throw new Error('no narration for scene ' + id);
@@ -120,13 +123,13 @@ const NARRATION = {
   clicks: [C('In the replay, a red ring shows what was clicked.'), C('It is in the exported video too, and one checkbox turns it off.')],
   pauseCard: [C('Where capture was paused, the replay says so:'), C('a short card instead of the time away. Nothing was recorded there.')],
   rename: [C('Steps can be renamed in your own words, like the code you typed.'), C('The recorded action stays right under it.')],
-  editor: [C('Before sharing, hide sensitive data.'), C('Open a screenshot, blur the card number, and box the error.')],
+  editor: [C('Before sharing, hide sensitive data.'), C('Open a screenshot, blur the card details, and box the error.')],
   editorSave: [C('The original screenshot is never modified.'), C('Only the exported copy carries the blur.')],
   videoFind: [C('Now the video. First, jump to a moment where the card number is on screen.')],
-  videoMask: [C('Drag a box over the card field.'), C('Blur it from the moment the number is typed until the error appears.')],
-  videoMask2: [C('The error message pushes the form down,'), C('so a second mask covers the field until the end.')],
+  videoMask: [C('Drag a box over the card details.'), C('Blur them from the moment the number is typed until the error appears.')],
+  videoMask2: [C('The error message pushes the form down,'), C('so a second mask covers them until the end.')],
   videoPreview: [C('The preview shows exactly what will be exported.')],
-  videoDone: [C('Now the card number is hidden in every frame where it appears.')],
+  videoDone: [C('Now the card details are hidden in every frame where they appear.')],
   describe: [C('Describe what happened, and what you expected.'), C('The expected result is always written by you.')],
   export: [C('One click exports an evidence package, an H T M L report, and a Word document.', 'One click exports an Evidence Package, an HTML report and a Word document.')],
   html: [C('The H T M L report is self contained, with the blurred screenshots,', 'The HTML report is self-contained, with the blurred screenshots,'), C('so developers can open it anywhere.')],
@@ -255,7 +258,11 @@ try {
     await clickEl(page, tabOff, '#cvv'); await typeText('123', 110); await beat(500);
   });
   // where the card field sits before the error banner appears (the banner pushes the form down)
-  const cardPre = await page.eval(`(() => { const r = document.querySelector('#card').getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; })()`);
+  // the card details: number, expiry and CVV are one block (one mask), as soon as the number is typed
+  const CARD_BLOCK = `(() => { const rs = ['#card', '#exp', '#cvv'].map((s) => document.querySelector(s).getBoundingClientRect());
+    const x1 = Math.min(...rs.map((r) => r.left)), y1 = Math.min(...rs.map((r) => r.top)), x2 = Math.max(...rs.map((r) => r.right)), y2 = Math.max(...rs.map((r) => r.bottom));
+    return [x1 / innerWidth, y1 / innerHeight, x2 / innerWidth, y2 / innerHeight]; })()`;
+  const cardPre = await page.eval(CARD_BLOCK);
   await scene('bug2', async () => {
     await clickEl(page, tabOff, '#place'); await beat(2300);
     await clickEl(panel, panelOff, '#markerLabel'); await typeText('Order fails with E-4021', 55);
@@ -267,7 +274,8 @@ try {
     }
     await beat(600);
   });
-  const boxes = await page.eval(`(() => { const n = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; }; return { card: n('#card'), err: n('#error .err') }; })()`);
+  const boxes = await page.eval(`(() => { const n = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; }; return { err: n('#error .err') }; })()`);
+  boxes.card = await page.eval(CARD_BLOCK);
   boxes.cardPre = cardPre;
 
   // ---- 8. privacy pause
@@ -407,7 +415,9 @@ try {
   await scene('videoPreview', async () => {
     await clickEl(rv, tabOff, '#pt-preview', { ms: 800 });
   });
+  const renderFrom = vt();
   for (let i = 0; i < 120; i++) { if (await rv.eval(`!!document.querySelector('#pt-form .badge')`)) break; await sleep(500); }
+  fastWindow(renderFrom + 0.3, vt() - 0.2);
   await sleep(400);
   const masks = await rv.eval(`[...document.querySelectorAll('#pt-list li')].map((li) => li.textContent.trim())`);
   console.log('video masks:', JSON.stringify(masks), 'card typed at', tt.card.toFixed(2), 's, Place order at', tt.place.toFixed(2), 's, duration', tt.dur.toFixed(2), 's');
@@ -431,7 +441,9 @@ try {
     await clickEl(rv, tabOff, '.fmt:has([data-fmt="docx"])', { ms: 800 });
     await beat(400);
     await clickEl(rv, tabOff, '#export', { ms: 800 });
+    const exportFrom = Math.max(vt(), timeline.export + VOICE.export.duration + 0.4); // only once the line is spoken
     for (let i = 0; i < 90; i++) { if (readdirSync(dl).filter((f) => !f.endsWith('.crdownload')).length >= 3) break; await sleep(500); }
+    fastWindow(exportFrom, vt() - 0.2);
     await beat(1500);
   });
 
@@ -469,7 +481,24 @@ if (process.exitCode) process.exit(process.exitCode);
 // ------------------------------------------------------------------ post-production
 const raw = path.join(work, 'raw.mp4');
 if (!existsSync(raw)) throw new Error('no recording');
-const dur = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', raw]).toString());
+// fast-forward the silent render waits; every later scene (and so its voice and captions) moves up by the time saved
+const SPEED = Number(process.env.FILM_FAST ?? 2);
+let src = raw;
+if (fast.length && SPEED > 1) {
+  const wins = fast.sort((a, b) => a[0] - b[0]);
+  const parts = [];
+  let t = 0;
+  for (const [a, b] of wins) { if (a > t) parts.push([t, a, 1]); parts.push([a, b, SPEED]); t = b; }
+  parts.push([t, null, 1]);
+  const graph = parts.map(([a, b, k], i) => `[0:v]trim=start=${a.toFixed(3)}${b != null ? `:end=${b.toFixed(3)}` : ''},setpts=(PTS-STARTPTS)/${k}[p${i}]`).join(';')
+    + ';' + parts.map((_, i) => `[p${i}]`).join('') + `concat=n=${parts.length}:v=1:a=0,fps=${FPS}[v]`;
+  src = path.join(work, 'paced.mp4');
+  execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-filter_complex', graph, '-map', '[v]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '17', '-pix_fmt', 'yuv420p', src]);
+  const saved = (x) => wins.reduce((d, [a, b]) => d + Math.max(0, Math.min(x, b) - a) * (1 - 1 / SPEED), 0);
+  for (const k of Object.keys(timeline)) timeline[k] -= saved(timeline[k]);
+  console.log(`render waits played x${SPEED}:`, wins.map(([a, b]) => `${a.toFixed(1)}–${b.toFixed(1)} s`).join(', '), `(${saved(Infinity).toFixed(1)} s shorter)`);
+}
+const dur = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', src]).toString());
 
 // captions: one per spoken phrase, on screen while it is spoken (plus a short tail), never overlapping
 const caps = [];
@@ -500,8 +529,8 @@ execFileSync(voice.py, [path.join(here, 'narrate.py'), 'mix', path.join(voiceDir
 const vfade = `fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
 const afilt = `loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,afade=t=in:st=0:d=0.3,afade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
 const enc = ['-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '1', '-movflags', '+faststart', '-shortest'];
-execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-i', narration, '-vf', vfade, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo.mp4')]);
+execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', src, '-i', narration, '-vf', vfade, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo.mp4')]);
 const fontDir = '/usr/share/fonts/opentype/inter';
-execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-i', narration, '-vf', `subtitles=${assFile}:fontsdir=${fontDir},${vfade}`, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo-subtitles.mp4')]);
+execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', src, '-i', narration, '-vf', `subtitles=${assFile}:fontsdir=${fontDir},${vfade}`, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo-subtitles.mp4')]);
 console.log(`film done: ${dur.toFixed(1)} s, ${caps.length} captions -> docs/demo/reprodesk-demo.mp4 (voice), reprodesk-demo-subtitles.mp4 (voice + captions), reprodesk-demo.en.srt`);
 if (!process.env.FILM_KEEP) rmSync(work, { recursive: true, force: true });
