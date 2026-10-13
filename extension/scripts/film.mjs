@@ -186,7 +186,7 @@ try {
   rec = spawn('ffmpeg', ['-y', '-v', 'error', '-nostats', '-progress', 'pipe:1', '-f', 'x11grab', '-framerate', String(FPS), '-video_size', `${W}x${H}`, '-draw_mouse', '1', '-i', `${DISPLAY}.0+0,0`,
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '17', '-pix_fmt', 'yuv420p', raw], { stdio: ['pipe', 'pipe', 'inherit'] });
   rec.stdout.on('data', (d) => { for (const m of String(d).matchAll(/out_time_us=(\d+)/g)) recStartWall = Date.now() - Number(m[1]) / 1000; });
-  for (let i = 0; i < 40 && !recStartWall; i++) await sleep(100);
+  for (let i = 0; i < 150 && !recStartWall; i++) await sleep(100); // the first numeric progress line can take a few seconds on a cold machine
   if (!recStartWall) throw new Error('screen recorder did not start');
   await sleep(600);
 
