@@ -117,6 +117,9 @@ const NARRATION = {
   finish: [C('Finish and review stops the recording, and opens the report.', 'Finish & review stops the recording and opens the report.')],
   review: [C('Here is the report: the video, a live timeline,'), C('and steps drafted from what really happened. No A I guesses.', 'and steps drafted from what really happened. No AI guesses.')],
   timeline: [C('Click any row of the timeline to jump to that moment.')],
+  clicks: [C('In the replay, a red ring shows what was clicked.'), C('It is in the exported video too, and one checkbox turns it off.')],
+  pauseCard: [C('Where capture was paused, the replay says so:'), C('a short card instead of the time away. Nothing was recorded there.')],
+  rename: [C('Steps can be renamed in your own words, like the code you typed.'), C('The recorded action stays right under it.')],
   editor: [C('Before sharing, hide sensitive data.'), C('Open a screenshot, blur the card number, and box the error.')],
   editorSave: [C('The original screenshot is never modified.'), C('Only the exported copy carries the blur.')],
   videoFind: [C('Now the video. First, jump to a moment where the card number is on screen.')],
@@ -302,6 +305,39 @@ try {
     await rv.eval(`document.querySelector('#tl [data-i="${row}"]').scrollIntoView({ block: 'center', behavior: 'instant' })`);
     await sleep(400);
     await clickEl(rv, tabOff, `#tl [data-i="${row}"]`, { ms: 900 });
+    await beat(1800);
+  });
+
+  // ---- 9b. what the replay adds: click rings, the pause card; steps in the reporter's words
+  /** Plays the replay from a little before the moment a timeline row points at (the rows know the video clock). */
+  const playBefore = (re, lead, last = false) => rv.eval(`(() => { const v = document.getElementById('vid'); const rows = [...document.querySelectorAll('#tl .tl')].filter((x) => ${re}.test(x.textContent));
+    const r = ${last ? 'rows.at(-1)' : 'rows[0]'}; if (!r) return null; r.click(); const t = v.currentTime; v.muted = true; v.currentTime = Math.max(0, t - ${lead}); v.play().catch(() => undefined); return t; })()`);
+  await smoothTo(rv, '#stage', 'center');
+  await scene('clicks', async () => {
+    const st = await rectOf(rv, '#stage');
+    await glide(Math.round(tabOff.dx + st.x + st.w * 0.5), Math.round(tabOff.dy + st.y + st.h * 0.9), 700);
+    const at = await playBefore('/"Apply"/', 0.9);
+    if (at == null) console.log('film: no "Apply" click row for the click-ring scene');
+    await beat(2600);
+    const hl = await rectOf(rv, '.hlclicks');
+    if (hl) await glide(Math.round(tabOff.dx + hl.x + 10), Math.round(tabOff.dy + hl.y + hl.h / 2), 900);
+    await beat(800);
+  });
+  await scene('pauseCard', async () => {
+    const at = await playBefore('/Privacy Pause start/', 1.0, true);
+    if (at == null) console.log('film: no Privacy Pause row for the pause-card scene');
+    const st = await rectOf(rv, '#stage');
+    await glide(Math.round(tabOff.dx + st.x + st.w * 0.5), Math.round(tabOff.dy + st.y + st.h * 0.9), 900);
+    await beat(3800);
+  });
+  await rv.eval(`document.getElementById('vid').pause()`).catch(() => undefined);
+  await smoothTo(rv, '#steps', 'center');
+  await scene('rename', async () => {
+    const i = Math.max(0, await rv.eval(`[...document.querySelectorAll('#steps li')].findIndex((li) => /Promo code/.test(li.textContent))`));
+    await clickEl(rv, tabOff, `#steps li:nth-child(${i + 1}) [data-rename]`, { ms: 900 });
+    await sleep(350);
+    selectAll(); await typeText('Enter promo code SUMMER20', 75);
+    xdo('key', 'Return');
     await beat(1800);
   });
 
