@@ -541,7 +541,7 @@ const narration = path.join(work, 'narration.wav');
 execFileSync(voice.py, [path.join(here, 'narrate.py'), 'mix', path.join(voiceDir, 'manifest.json'), path.join(work, 'timeline.json'), narration, String(dur)]);
 const vfade = `fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
 const afilt = `loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,afade=t=in:st=0:d=0.3,afade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
-const enc = ['-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '1', '-movflags', '+faststart', '-shortest'];
+const enc = ['-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'slow', '-crf', '22', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '64k', '-ac', '1', '-movflags', '+faststart', '-shortest'];
 if (CLEAN) execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', src, '-i', narration, '-vf', vfade, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo.mp4')]);
 const fontDir = '/usr/share/fonts/opentype/inter';
 execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', src, '-i', narration, '-vf', `subtitles=${assFile}:fontsdir=${fontDir},${vfade}`, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo-subtitles.mp4')]);
