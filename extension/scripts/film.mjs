@@ -3,6 +3,7 @@
 // The narration is synthesized first (offline neural TTS, Piper), so every scene lasts at least as long as its narration and
 // every caption is timed to the exact phrase being spoken.
 // Output (docs/demo/): reprodesk-demo.mp4 (voice-over, no captions), reprodesk-demo-subtitles.mp4 (voice-over + captions), reprodesk-demo.en.srt
+//   (FILM_CLEAN=0: only the captioned film), FILM_FAST: how much faster the silent render waits play (default 2)
 //   node scripts/film.mjs     needs Xvfb, openbox, xdotool, ffmpeg with libass, ImageMagick, Pillow (see README); the first run also
 //   creates a Python venv with piper-tts and fetches the CC0 voice "en_US joe medium" from npm into ~/.cache/reprodesk-film.
 //   FILM_VOICE_MODEL=/path/voice.onnx (with voice.onnx.json next to it) uses any other Piper voice instead.
@@ -126,8 +127,9 @@ const NARRATION = {
   editor: [C('Before sharing, hide sensitive data.'), C('Open a screenshot, blur the card details, and box the error.')],
   editorSave: [C('The original screenshot is never modified.'), C('Only the exported copy carries the blur.')],
   videoFind: [C('Now the video. First, jump to a moment where the card number is on screen.')],
-  videoMask: [C('Drag a box over the card details.'), C('Blur them from the moment the number is typed until the error appears.')],
-  videoMask2: [C('The error message pushes the form down,'), C('so a second mask covers them until the end.')],
+  videoMask: [C('Drag a box over the card number.'), C('Blur it from the moment it is typed until the error appears.')],
+  videoMaskExp: [C('Then the expiry date and C V V, from the moment they are typed.', 'Then the expiry date and CVV, from the moment they are typed.')],
+  videoMask2: [C('The error message pushes the form down,'), C('so two more masks cover both until the end.')],
   videoPreview: [C('The preview shows exactly what will be exported.')],
   videoDone: [C('Now the card details are hidden in every frame where they appear.')],
   describe: [C('Describe what happened, and what you expected.'), C('The expected result is always written by you.')],
@@ -258,11 +260,11 @@ try {
     await clickEl(page, tabOff, '#cvv'); await typeText('123', 110); await beat(500);
   });
   // where the card field sits before the error banner appears (the banner pushes the form down)
-  // the card details: number, expiry and CVV are one block (one mask), as soon as the number is typed
-  const CARD_BLOCK = `(() => { const rs = ['#card', '#exp', '#cvv'].map((s) => document.querySelector(s).getBoundingClientRect());
+  // the card number, and the expiry + CVV row: each gets its own masks, from the moment it is typed
+  const BOX = (sels) => `(() => { const rs = ${JSON.stringify(sels)}.map((s) => document.querySelector(s).getBoundingClientRect());
     const x1 = Math.min(...rs.map((r) => r.left)), y1 = Math.min(...rs.map((r) => r.top)), x2 = Math.max(...rs.map((r) => r.right)), y2 = Math.max(...rs.map((r) => r.bottom));
     return [x1 / innerWidth, y1 / innerHeight, x2 / innerWidth, y2 / innerHeight]; })()`;
-  const cardPre = await page.eval(CARD_BLOCK);
+  const cardPre = await page.eval(BOX(['#card'])), expPre = await page.eval(BOX(['#exp', '#cvv']));
   await scene('bug2', async () => {
     await clickEl(page, tabOff, '#place'); await beat(2300);
     await clickEl(panel, panelOff, '#markerLabel'); await typeText('Order fails with E-4021', 55);
@@ -275,8 +277,10 @@ try {
     await beat(600);
   });
   const boxes = await page.eval(`(() => { const n = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.x / innerWidth, r.y / innerHeight, (r.x + r.width) / innerWidth, (r.y + r.height) / innerHeight]; }; return { err: n('#error .err') }; })()`);
-  boxes.card = await page.eval(CARD_BLOCK);
+  boxes.card = await page.eval(BOX(['#card']));
+  boxes.exp = await page.eval(BOX(['#exp', '#cvv']));
   boxes.cardPre = cardPre;
+  boxes.expPre = expPre;
 
   // ---- 8. privacy pause
   let blank = null;
@@ -358,8 +362,8 @@ try {
     const c = await rectOf(rv, '#ed-canvas');
     const pad = 0.012;
     await clickEl(rv, tabOff, '[data-tool="blur"]');
-    await drag(pointAt(tabOff, c, boxes.card[0] - pad, boxes.card[1] - pad * 1.4), pointAt(tabOff, c, boxes.card[2] + pad, boxes.card[3] + pad * 1.4));
-    await beat(700);
+    for (const b of [boxes.card, boxes.exp]) { await drag(pointAt(tabOff, c, b[0] - pad, b[1] - pad * 1.4), pointAt(tabOff, c, b[2] + pad, b[3] + pad * 1.4)); await beat(400); }
+    await beat(300);
     await clickEl(rv, tabOff, '[data-tool="rect"]');
     await drag(pointAt(tabOff, c, boxes.err[0] - pad, boxes.err[1] - pad), pointAt(tabOff, c, boxes.err[2] + pad, boxes.err[3] + pad));
     await beat(900);
@@ -373,8 +377,8 @@ try {
   // Video times of the card number: a timeline row click seeks the player, so the rows tell us (video time, pre-session context included).
   const tt = await rv.eval(`(() => { const v = document.getElementById('vid'); const rows = [...document.querySelectorAll('#tl .tl')];
     const at = (re) => { const r = rows.find((x) => re.test(x.textContent)); if (!r) return null; r.click(); return v.currentTime; };
-    const out = { card: at(/Card number/), place: at(/Place order/), dur: v.duration }; v.pause(); v.currentTime = 0; return out; })()`);
-  if (tt.card == null || tt.place == null || !Number.isFinite(tt.dur)) throw new Error('card / Place order not found in the timeline: ' + JSON.stringify(tt));
+    const out = { card: at(/Card number/), exp: at(/Expiry/), place: at(/Place order/), dur: v.duration }; v.pause(); v.currentTime = 0; return out; })()`);
+  if (tt.card == null || tt.exp == null || tt.place == null || !Number.isFinite(tt.dur)) throw new Error('card / Place order not found in the timeline: ' + JSON.stringify(tt));
   const playerGeo = () => rv.eval(`(() => { const v = document.getElementById('vid'); const r = v.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, vw: v.videoWidth, vh: v.videoHeight }; })()`);
   const contentBox = (g) => { const ar = g.vw / g.vh; let cw = g.w, ch = g.h; if (g.w / g.h > ar) cw = g.h * ar; else ch = g.w / ar; return { x: g.x + (g.w - cw) / 2, y: g.y + (g.h - ch) / 2, w: cw, h: ch }; };
   /** A real click on the player's seek bar, then the exact frame. */
@@ -398,19 +402,27 @@ try {
     await seekTo(tt.place - 0.4); // card, expiry and CVV are typed, the error has not appeared yet
     await beat(1200);
   });
-  await scene('videoMask', async () => {
-    await maskOver(boxes.cardPre);
-    await seekTo(Math.max(0, tt.card - 0.3)); await clickEl(rv, tabOff, '#pt-from-now', { ms: 600 });
-    await seekTo(Math.min(tt.dur, tt.place + 2.2)); await clickEl(rv, tabOff, '#pt-to-now', { ms: 600 }); // the banner shows 1.1 s after the click
-    await beat(500);
-    await clickEl(rv, tabOff, '#pt-add', { ms: 700 }); await beat(700);
-  });
+  // before the error: from the moment each field is typed until the banner (1.1 s after Place order) moves the form down
+  // a box is drawn on a frame with the same layout: before the banner for these, after it for the next two
+  async function maskUntilBanner(box, from) {
+    if (Math.abs((await rv.eval(`document.getElementById('vid').currentTime`)) - (tt.place - 0.4)) > 0.05) await seekTo(tt.place - 0.4);
+    await maskOver(box);
+    await seekTo(Math.max(0, from - 0.3)); await clickEl(rv, tabOff, '#pt-from-now', { ms: 600 });
+    await seekTo(Math.min(tt.dur, tt.place + 1.6)); await clickEl(rv, tabOff, '#pt-to-now', { ms: 600 });
+    await beat(400);
+    await clickEl(rv, tabOff, '#pt-add', { ms: 700 }); await beat(600);
+  }
+  await scene('videoMask', () => maskUntilBanner(boxes.cardPre, tt.card));
+  await scene('videoMaskExp', () => maskUntilBanner(boxes.expPre, tt.exp));
   await scene('videoMask2', async () => {
-    await maskOver(boxes.card);
-    await seekTo(tt.place + 0.2); await clickEl(rv, tabOff, '#pt-from-now', { ms: 600 });
-    const to = await rectOf(rv, '#pt-to'); await glide(Math.round(tabOff.dx + to.x + to.w / 2), Math.round(tabOff.dy + to.y + to.h / 2), 600); // To already says "end of recording"
-    await beat(500);
-    await clickEl(rv, tabOff, '#pt-add', { ms: 700 }); await beat(700);
+    for (const b of [boxes.card, boxes.exp]) {
+      await seekTo(Math.min(tt.dur - 0.1, tt.place + 2.0));
+      await maskOver(b);
+      await seekTo(tt.place + 0.9); await clickEl(rv, tabOff, '#pt-from-now', { ms: 600 });
+      const to = await rectOf(rv, '#pt-to'); await glide(Math.round(tabOff.dx + to.x + to.w / 2), Math.round(tabOff.dy + to.y + to.h / 2), 500); // To already says "end of recording"
+      await beat(300);
+      await clickEl(rv, tabOff, '#pt-add', { ms: 700 }); await beat(500);
+    }
   });
   await scene('videoPreview', async () => {
     await clickEl(rv, tabOff, '#pt-preview', { ms: 800 });
@@ -516,7 +528,8 @@ const lines = (text, n = 44) => {
   for (const i of punct.length ? punct : spaces) if (best < 0 || Math.abs(i - mid) < Math.abs(best - mid)) best = i;
   return best < 0 ? [text] : [text.slice(0, best), text.slice(best + 1)];
 };
-writeFileSync(path.join(out, 'reprodesk-demo.en.srt'), caps.map((c, i) => `${i + 1}\n${ts(c.s, true)} --> ${ts(c.e, true)}\n${lines(c.text).join('\n')}\n`).join('\n'));
+const CLEAN = process.env.FILM_CLEAN !== '0';
+if (CLEAN) writeFileSync(path.join(out, 'reprodesk-demo.en.srt'), caps.map((c, i) => `${i + 1}\n${ts(c.s, true)} --> ${ts(c.e, true)}\n${lines(c.text).join('\n')}\n`).join('\n'));
 // Caption look: white text with a dark outline and a soft shadow, no background box, bottom centre, over the picture
 const ass = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: YT,Inter,34,&H00FFFFFF,&H00FFFFFF,&H00141414,&H8C000000,0,0,0,0,100,100,0,0,1,2.6,1.4,2,40,40,46,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${caps.map((c) => `Dialogue: 0,${ts(c.s, false)},${ts(c.e, false)},YT,,0,0,0,,${lines(c.text).join('\\N')}`).join('\n')}\n`;
 const assFile = path.join(work, 'captions.ass');
@@ -529,7 +542,7 @@ execFileSync(voice.py, [path.join(here, 'narrate.py'), 'mix', path.join(voiceDir
 const vfade = `fade=t=in:st=0:d=0.5,fade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
 const afilt = `loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,afade=t=in:st=0:d=0.3,afade=t=out:st=${(dur - 0.7).toFixed(2)}:d=0.7`;
 const enc = ['-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'slow', '-crf', '19', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-ac', '1', '-movflags', '+faststart', '-shortest'];
-execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', src, '-i', narration, '-vf', vfade, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo.mp4')]);
+if (CLEAN) execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', src, '-i', narration, '-vf', vfade, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo.mp4')]);
 const fontDir = '/usr/share/fonts/opentype/inter';
 execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', src, '-i', narration, '-vf', `subtitles=${assFile}:fontsdir=${fontDir},${vfade}`, '-af', afilt, ...enc, path.join(out, 'reprodesk-demo-subtitles.mp4')]);
 console.log(`film done: ${dur.toFixed(1)} s, ${caps.length} captions -> docs/demo/reprodesk-demo.mp4 (voice), reprodesk-demo-subtitles.mp4 (voice + captions), reprodesk-demo.en.srt`);
