@@ -22,7 +22,8 @@
     "notices": "node scripts/gen-notices.mjs && rm -rf .notices-tmp",
     "demo:bundle": "node build.mjs && node scripts/make-sample-bundle.mjs",
     "policy": "node scripts/gen-policy.mjs",
-    "demo:film": "node build.mjs && node scripts/film.mjs"
+    "demo:film": "node build.mjs && node scripts/film.mjs",
+    "demo:film:devlog": "node build.mjs && node scripts/film-devlog.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.4",
