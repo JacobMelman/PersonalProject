@@ -1,6 +1,8 @@
 import type { ReportModel } from './model';
 import { formatClock } from '../shared/filename';
 import { logo } from '../ui/brand';
+import { devlogSummary, PROBLEMS_SHOWN } from './render-text';
+import { consoleText, isConsoleProblem, isNetProblem, netStatus } from '../shared/devlog';
 
 export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -41,9 +43,32 @@ ol.steps li::before{content:counter(s);display:grid;place-items:center;width:24p
 figure{margin:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--card)}figure img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top}
 figcaption{display:flex;justify-content:space-between;padding:8px 12px;font-size:12.5px;color:var(--muted)}
 video{width:100%;border-radius:14px;background:#05070b;border:1px solid var(--line)}
+.probs{list-style:none;margin:0;padding:0;display:grid;gap:6px}.probs li{display:grid;grid-template-columns:54px 1fr;gap:10px;font-size:13.5px}.probs code,.log td.m{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+details.log{margin-top:12px}details.log summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:600}
+.log table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}.log td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:top}.log td.t{white-space:nowrap}
+.log tr.bad td{color:var(--red)}.log tr.warn td{color:var(--amber)}
 footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--faint);font-size:12.5px;display:flex;gap:10px;align-items:flex-start}
 @media (max-width:640px){.stats{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}
 @media print{body{background:#fff}.card,figure,.stat{break-inside:avoid;box-shadow:none}video{display:none}}`;
+
+/** Rows shown per table in the HTML report; the Evidence Package has every entry. */
+const LOG_ROWS = 1000;
+function devlogHtml(m: ReportModel, assets: 'inline' | 'zip'): string {
+  const d = m.devlog;
+  if (!d) return '';
+  const probs = d.problems.length
+    ? `<ul class="probs">${d.problems.slice(0, PROBLEMS_SHOWN).map((p) => `<li><span class="t">${esc(p.rel)}</span><code>${esc(p.text)}</code></li>`).join('')}</ul>${d.problems.length > PROBLEMS_SHOWN ? `<p class="muted" style="font-size:12.5px;margin:8px 0 0">${d.problems.length - PROBLEMS_SHOWN} more below.</p>` : ''}`
+    : '<span class="muted">No console errors or failed requests.</span>';
+  const more = (n: number) => (n > LOG_ROWS ? `<p class="muted" style="font-size:12.5px">${n - LOG_ROWS} more in the Evidence Package.</p>` : '');
+  const con = d.console.length
+    ? `<details class="log"><summary>All console messages (${d.console.length})</summary><table>${d.console.slice(0, LOG_ROWS).map((c) => `<tr class="${isConsoleProblem(c) ? 'bad' : c.level === 'warn' ? 'warn' : ''}"><td class="t">${esc(c.rel)}</td><td>${esc(c.level)}</td><td class="m">${esc(consoleText(c))}${c.stack ? `<br><span class="muted">${esc(c.stack).replace(/\n/g, '<br>')}</span>` : ''}</td></tr>`).join('')}</table>${more(d.console.length)}</details>`
+    : '';
+  const net = d.network.length
+    ? `<details class="log"><summary>All requests (${d.network.length})</summary><table>${d.network.slice(0, LOG_ROWS).map((n) => `<tr class="${isNetProblem(n) ? 'bad' : ''}"><td class="t">${esc(n.rel)}</td><td>${esc(n.method || n.initiator || n.kind)}</td><td class="m">${esc(n.url)}</td><td>${esc(netStatus(n))}</td><td class="t">${n.ms} ms</td></tr>`).join('')}</table>${more(d.network.length)}</details>`
+    : '';
+  const files = assets === 'zip' ? ' Full log: <code>console.json</code> and <code>network.har</code> (opens in Chrome DevTools → Network → Import).' : '';
+  return `<h2>Console &amp; network</h2><div class="card"><p class="muted" style="margin:0 0 10px;font-size:13px">${esc(devlogSummary(d))}. Filtered on this device: no request bodies, headers, cookies or query values.${files}</p>${probs}${con}${net}</div>`;
+}
 
 /** assets: 'inline' embeds screenshots as data URIs (standalone file); 'zip' references files inside the Evidence Package. */
 export function renderHtml(m: ReportModel, assets: 'inline' | 'zip'): string {
@@ -72,6 +97,7 @@ ${m.endNote ? `<div class="callout">${esc(m.endNote)}</div>` : ''}
 <h2>Result</h2><div class="two"><div class="card exp"><h3>Expected</h3><p>${m.expected ? esc(m.expected) : '<span class="muted">not provided</span>'}</p></div><div class="card act"><h3>Actual</h3><p>${m.actual ? esc(m.actual) : '<span class="muted">not provided</span>'}</p></div></div>
 ${m.notes ? `<h2>Notes</h2><div class="card"><pre>${esc(m.notes)}</pre></div>` : ''}
 <h2>Important moments</h2><div class="card">${m.moments.length ? `<ul class="moments">${m.moments.map((x) => `<li class="${x.system ? 'sys' : ''}"><span class="t">${esc(x.rel)}</span><span class="dot"></span><span>${esc(x.label)}${x.note ? ` <span class="muted">· ${esc(x.note)}</span>` : ''}</span></li>`).join('')}</ul>` : '<span class="muted">None recorded.</span>'}</div>
+${devlogHtml(m, assets)}
 <h2>Replay</h2>${video}
 <h2>Screenshots</h2>${shots ? `<div class="gallery">${shots}</div>` : '<div class="card"><span class="muted">None.</span></div>'}
 <footer><span>⚠</span><span>Rendered pixels may contain sensitive values visible in the tested application. ReproDesk never collects keystrokes, clipboard contents or typed values, but the video shows what was on screen. Review before sharing.</span></footer>

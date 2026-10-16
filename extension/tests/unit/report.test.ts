@@ -5,6 +5,7 @@ import { renderHtml } from '../../src/report/render-html';
 import { renderMarkdown, renderTxt } from '../../src/report/render-text';
 import { renderXlsx } from '../../src/report/render-xlsx';
 import { buildEvidencePackage, sha256Hex } from '../../src/report/package';
+import { renderDocx } from '../../src/report/render-docx';
 import type { ReportRecord, ScreenshotItem, SessionRecord, TimelineEvent } from '../../src/shared/types';
 
 const T0 = 1_800_000_000_000;
@@ -115,5 +116,67 @@ describe('evidence package', () => {
     const blob = await buildEvidencePackage({ model: build(false), session, events, shots: [], video: null, keepPre: false, version: '0.0.1' });
     const zip = unzipSync(new Uint8Array(await blob.arrayBuffer()));
     expect(strFromU8(zip['events.json'])).not.toContain('Pre-session click');
+  });
+});
+
+describe('console & network log in reports', () => {
+  const logs: TimelineEvent[] = [
+    ev(T0 + 1500, 'console', { log: { level: 'info', source: 'console', text: 'cart loaded' } }),
+    ev(T0 + 2000, 'console', { log: { level: 'error', source: 'console', text: 'Payment failed <E-4021>' } }),
+    ev(T0 + 2100, 'console', { log: { level: 'error', source: 'exception', text: 'TypeError: x is undefined', stack: 'at pay (https://qa.example/app.js:1:2)' } }),
+    ev(T0 + 2500, 'network', { net: { kind: 'fetch', method: 'POST', url: 'https://qa.example/api/order', status: 500, ms: 120 } }),
+    ev(T0 + 2600, 'network', { net: { kind: 'resource', method: '', url: 'https://qa.example/logo.png', status: 200, ms: 8, initiator: 'img' } }),
+  ];
+  const all = [...events, ...logs];
+  const withLogs = buildReportModel({ session, events: all, shots: [], report, videoInfo: null, keepPre: true });
+  const without = buildReportModel({ session, events: all, shots: [], report, videoInfo: null, keepPre: true, excludeLogs: true });
+
+  it('keeps every entry in the model, puts only problems on the timeline, and never turns them into steps', () => {
+    expect(withLogs.devlog?.console).toHaveLength(3);
+    expect(withLogs.devlog?.network).toHaveLength(2);
+    expect(withLogs.devlog?.problems.map((p) => p.text)).toEqual(['Console error: Payment failed <E-4021>', 'Uncaught TypeError: x is undefined', 'Request failed: POST https://qa.example/api/order → 500 (120 ms)']);
+    expect(withLogs.timeline.map((t) => t.text)).toContain('Request failed: POST https://qa.example/api/order → 500 (120 ms)');
+    expect(withLogs.timeline.some((t) => /cart loaded|logo\.png/.test(t.text))).toBe(false);
+    expect(withLogs.steps).toEqual(build(true).steps);
+  });
+  it('a report without the log has no section, no timeline rows and no files', async () => {
+    expect(without.devlog).toBeNull();
+    expect(without.timeline.some((t) => /Request failed|Console/.test(t.text))).toBe(false);
+    expect(renderTxt(without)).not.toContain('Console errors and failed requests');
+    const zip = unzipSync(new Uint8Array(await (await buildEvidencePackage({ model: without, session, events: all, shots: [], video: null, keepPre: true, version: '0.0.1' })).arrayBuffer()));
+    expect(zip['console.json']).toBeUndefined();
+    expect(zip['network.har']).toBeUndefined();
+    expect(JSON.parse(strFromU8(zip['manifest.json'])).console_network_log).toBeNull();
+  });
+  it('every text format lists the problems (escaped where it matters)', () => {
+    const txt = renderTxt(withLogs);
+    expect(txt).toContain('Console errors and failed requests');
+    expect(txt).toContain('3 console messages (2 errors), 2 requests (1 failed)');
+    expect(txt).toMatch(/\[00:02\] Console error: Payment failed <E-4021>/);
+    expect(renderMarkdown(withLogs)).toContain('Console error: Payment failed \\<E-4021\\>');
+    const html = renderHtml(withLogs, 'zip');
+    expect(html).toContain('Payment failed &lt;E-4021&gt;');
+    expect(html).not.toContain('Payment failed <E-4021>');
+    expect(html).toContain('All requests (2)');
+  });
+  it('the ZIP carries console.json, a HAR and a manifest entry; events.json keeps the actions only', async () => {
+    const zip = unzipSync(new Uint8Array(await (await buildEvidencePackage({ model: withLogs, session, events: all, shots: [], video: null, keepPre: true, version: '0.0.1' })).arrayBuffer()));
+    const con = JSON.parse(strFromU8(zip['console.json']));
+    expect(con.map((c: { level: string }) => c.level)).toEqual(['info', 'error', 'error']);
+    expect(con[2]).toMatchObject({ ts_ms: 2100, source: 'exception', stack: 'at pay (https://qa.example/app.js:1:2)' });
+    const har = JSON.parse(strFromU8(zip['network.har']));
+    expect(har.log.entries.map((e: { response: { status: number } }) => e.response.status)).toEqual([500, 200]);
+    const manifest = JSON.parse(strFromU8(zip['manifest.json']));
+    expect(manifest.console_network_log).toMatchObject({ console_entries: 3, requests: 2, problems: 3, redaction_rules: 'devlog-patterns-v1' });
+    for (const a of manifest.artifacts) expect(await sha256Hex(zip[a.path])).toBe(a.sha256);
+    expect(JSON.parse(strFromU8(zip['events.json'])).some((e: { type: string }) => e.type === 'console' || e.type === 'network')).toBe(false);
+  });
+  it('XLSX gets Console and Network sheets, DOCX a problems section', async () => {
+    const x = unzipSync(new Uint8Array(await renderXlsx(withLogs).arrayBuffer()));
+    expect(strFromU8(x['xl/workbook.xml'])).toMatch(/name="Console".*name="Network"/);
+    expect(strFromU8(x['xl/worksheets/sheet5.xml'])).toContain('https://qa.example/api/order');
+    expect(Object.keys(unzipSync(new Uint8Array(await renderXlsx(without).arrayBuffer())))).not.toContain('xl/worksheets/sheet4.xml');
+    const d = unzipSync(new Uint8Array(await (await renderDocx(withLogs)).arrayBuffer()));
+    expect(strFromU8(d['word/document.xml'])).toContain('Console errors and failed requests');
   });
 });

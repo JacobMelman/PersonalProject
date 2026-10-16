@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/shared/messages.ts
-  var PORT_NAME = "rd-content", FRAME_PORT_NAME = "rd-frame";
+  var PORT_NAME = "rd-content", FRAME_PORT_NAME = "rd-frame", PAGELOG_EVENTS = { batch: "__reprodesk_log", pull: "__reprodesk_log_pull", ping: "__reprodesk_log_ping" };
 
   // src/shared/privacy.ts
   var REDACTED = "[redacted]", EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, JWT = /eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/g, DIGITS = /\d[\d\s().-]{5,}\d/g, LONG_TOKEN = /\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{20,}\b/g;
@@ -175,6 +175,16 @@
     };
     isTop && checkNav(), addEventListener("popstate", checkNav), addEventListener("hashchange", checkNav), window.navigation?.addEventListener("navigatesuccess", checkNav), isTop && setInterval(checkNav, 750), document.addEventListener("visibilitychange", hello), isTop && (setInterval(() => {
       document.visibilityState === "visible" && send({ t: "ping" });
-    }, 1e3), addEventListener("pagehide", () => send({ t: "bye" })), addEventListener("pageshow", hello)), connect();
+    }, 1e3), addEventListener("pagehide", () => send({ t: "bye" })), addEventListener("pageshow", hello)), document.addEventListener(PAGELOG_EVENTS.batch, (e) => {
+      let d = e.detail;
+      if (typeof d != "string" || d.length > 1e6) return;
+      let items;
+      try {
+        items = JSON.parse(d);
+      } catch {
+        return;
+      }
+      !Array.isArray(items) || !items.length || send({ t: "logs", origin: location.origin, items: items.slice(0, 200) });
+    }), document.addEventListener(PAGELOG_EVENTS.ping, () => document.dispatchEvent(new CustomEvent(PAGELOG_EVENTS.pull))), connect(), document.dispatchEvent(new CustomEvent(PAGELOG_EVENTS.pull));
   }
 })();

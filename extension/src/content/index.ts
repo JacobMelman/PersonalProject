@@ -1,6 +1,6 @@
 // Target-page semantic collector. Records mouse/focus/submit/navigation semantics only.
 // It never reads: key events, clipboard, input/textarea/select/contenteditable values or text of editable controls.
-import { FRAME_PORT_NAME, PORT_NAME, type ContentMessage } from '../shared/messages';
+import { FRAME_PORT_NAME, PAGELOG_EVENTS, PORT_NAME, type ContentMessage } from '../shared/messages';
 import { implicitRole, isEditableKind, minimizeUrl, sanitizeLabel, sanitizeStableId } from '../shared/privacy';
 import type { ElementDescriptor } from '../shared/types';
 
@@ -184,5 +184,23 @@ function start(isTop: boolean): void {
     addEventListener('pageshow', hello);
   }
 
+  // Console & network log: the page recorder (pagelog.js, page world, injected only when the log is switched on) hands its entries
+  // over as JSON text. They are relayed as they are; the service worker decides whether to keep them and filters them first.
+  document.addEventListener(PAGELOG_EVENTS.batch, (e) => {
+    const d = (e as CustomEvent).detail;
+    if (typeof d !== 'string' || d.length > 1_000_000) return;
+    let items: unknown;
+    try {
+      items = JSON.parse(d);
+    } catch {
+      return;
+    }
+    if (!Array.isArray(items) || !items.length) return;
+    send({ t: 'logs', origin: location.origin, items: items.slice(0, 200) });
+  });
+  // Handshake in either order: whichever of the two scripts starts second makes the recorder send what it has buffered.
+  document.addEventListener(PAGELOG_EVENTS.ping, () => document.dispatchEvent(new CustomEvent(PAGELOG_EVENTS.pull)));
+
   connect();
+  document.dispatchEvent(new CustomEvent(PAGELOG_EVENTS.pull));
 }

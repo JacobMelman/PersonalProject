@@ -7,6 +7,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../demo
 export function startDemoSite(port = 5173) {
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
+    // The shop's API: every call fails like a payment gateway that does not answer (deliberate bug 2, E-4021).
+    if (u.pathname.startsWith('/api/')) {
+      res.writeHead(502, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'E-4021', message: 'Payment gateway did not answer' }));
+      return;
+    }
     const f = path.join(root, u.pathname);
     const file = u.pathname.startsWith('/fonts/') && existsSync(f) ? f : path.join(root, 'index.html');
     res.writeHead(200, { 'content-type': file.endsWith('.woff2') ? 'font/woff2' : 'text/html; charset=utf-8' });

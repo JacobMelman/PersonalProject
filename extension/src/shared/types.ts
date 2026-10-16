@@ -49,6 +49,8 @@ export interface Settings {
   openReviewAfterSave: boolean;
   /** Show where the user clicked: a ring over the replay in Review and in exported video (the recording itself is unchanged). */
   highlightClicks: boolean;
+  /** Console & network log: console messages, uncaught errors and request metadata of the approved target (opt-in, filtered, local). */
+  captureLogs: boolean;
   /** Extra origins that count as the same Target Profile (semantic scope). */
   approvedOrigins: string[];
   environment: string;
@@ -65,6 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   captureVideo: true,
   openReviewAfterSave: true,
   highlightClicks: true,
+  captureLogs: false,
   approvedOrigins: [],
   environment: 'QA',
 };
@@ -123,7 +126,9 @@ export type TimelineType =
   | 'navigate'
   | 'marker'
   | 'system'
-  | 'screenshot';
+  | 'screenshot'
+  | 'console'
+  | 'network';
 
 export interface ElementDescriptor {
   tag: string;
@@ -157,9 +162,14 @@ export interface TimelineEvent {
   confidence?: number;
   /** Event came from an iframe rather than the top document. */
   frame?: boolean;
+  /** type 'console': a filtered console message, uncaught error or unhandled rejection. */
+  log?: ConsoleEntry;
+  /** type 'network': filtered request metadata (no bodies, headers or query values). */
+  net?: NetEntry;
 }
 
 import type { Annotation } from './annotations';
+import type { ConsoleEntry, NetEntry } from './devlog';
 import type { VideoEdits } from './video-edits';
 
 export interface ScreenshotItem {

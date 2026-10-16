@@ -49,6 +49,11 @@
       "description": "false = video is forbidden: ReproDesk only works in Screenshot-only mode. true = not forbidden (the user's own choice stays).",
       "type": "boolean"
     },
+    "ConsoleNetworkLog": {
+      "title": "Console & network log",
+      "description": "true = always record the target's console messages, uncaught errors and request metadata (filtered, no bodies, headers or query values). false = never. Unset = the user decides (off by default).",
+      "type": "boolean"
+    },
     "EnvironmentLabel": {
       "title": "Environment label shown in every report",
       "type": "string"

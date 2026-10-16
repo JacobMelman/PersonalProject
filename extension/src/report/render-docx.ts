@@ -1,6 +1,7 @@
 import { Document, HeadingLevel, ImageRun, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from 'docx';
 import type { ReportModel } from './model';
 import { formatClock } from '../shared/filename';
+import { devlogSummary, PROBLEMS_SHOWN } from './render-text';
 
 const para = (text: string, opts: { bold?: boolean; italics?: boolean } = {}) => new Paragraph({ children: [new TextRun({ text, ...opts })] });
 
@@ -33,6 +34,14 @@ export async function renderDocx(m: ReportModel): Promise<Blob> {
     ...(m.notes ? [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Notes')] }), para(m.notes)] : []),
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Important moments')] }),
     ...(m.moments.length ? m.moments.map((x) => para(`[${x.rel}] ${x.system ? '(system) ' : ''}${x.label}${x.note ? ` - ${x.note}` : ''}`)) : [para('None.', { italics: true })]),
+    ...(m.devlog
+      ? [
+          new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Console errors and failed requests')] }),
+          para(devlogSummary(m.devlog), { italics: true }),
+          ...(m.devlog.problems.length ? m.devlog.problems.slice(0, PROBLEMS_SHOWN).map((p) => para(`[${p.rel}] ${p.text}`)) : [para('None.', { italics: true })]),
+          ...(m.devlog.problems.length > PROBLEMS_SHOWN ? [para(`${m.devlog.problems.length - PROBLEMS_SHOWN} more in the Evidence Package.`, { italics: true })] : []),
+        ]
+      : []),
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Screenshots and evidence')] }),
     para(m.video ? `Replay video: ${m.video.filename} (see the Evidence Package)` : `Video not available${m.videoNote ? `: ${m.videoNote}` : ''}`),
   ];

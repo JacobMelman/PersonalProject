@@ -1,7 +1,7 @@
 import {
-  addMarker, armFromTab, deleteSession, disarm, dispatch, enforcePolicyNow, enforceRetention, finishRepro, finishShotSession, getState, injectContent, notify, onIdleState,
+  addMarker, armFromTab, deleteSession, disarm, dispatch, enforcePolicyNow, enforceRetention, finishRepro, finishShotSession, getState, injectContent, injectPageLog, notify, onIdleState,
   onOffscreenEvent, onPort, onTabRemoved, onTabUpdated, openReview, recover, refreshBadge, reevaluate, resumeFromAfk, saveReplay,
-  serial, startRepro, takeScreenshot, tick,
+  serial, startRepro, syncPageLogScript, takeScreenshot, tick,
 } from './core';
 import type { CommandMessage, OffscreenEvent } from '../shared/messages';
 import { getSettings, onPolicyChanged, saveSettings } from '../shared/settings';
@@ -96,8 +96,11 @@ const applySettingsChange = () =>
   void serial(async () => {
     const next = await getSettings();
     await enforcePolicyNow();
+    await syncPageLogScript();
     const s = await getState();
     if (s.mode === 'inactive') return;
+    // the log was switched on while capturing: start the page recorder now rather than on the next page load
+    if (next.captureLogs && s.targetTabId != null && !s.terminal) await injectPageLog(s.targetTabId);
     await chrome.idle.setDetectionInterval(Math.max(15, (next.afkMinutes || 10) * 60));
     await chrome.runtime.sendMessage({ kind: 'off', op: 'config', settings: next }).catch(() => undefined);
   });

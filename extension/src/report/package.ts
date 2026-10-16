@@ -6,6 +6,7 @@ import { renderHtml } from './render-html';
 import { renderMarkdown, renderTxt } from './render-text';
 import type { MuxedVideo } from './video';
 import { hasRedaction } from '../shared/annotations';
+import { buildHar, REDACTION_RULES } from '../shared/devlog';
 
 export async function sha256Hex(data: Uint8Array): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', data as BufferSource);
@@ -40,7 +41,13 @@ export async function buildEvidencePackage(inp: PackageInput): Promise<Blob> {
   model.screenshots.forEach((s) => s.data && (files[s.filename] = s.data));
   Object.assign(files, inp.extraFiles ?? {});
   // Raw timeline stays separate from the draft steps (ACT-04). Values are always null by policy.
-  const visibleEvents = events.filter((e) => inp.keepPre || e.ts >= session.startedAt);
+  // The Console & network log has its own files (and is only in the package when the report model carries it).
+  const visibleEvents = events.filter((e) => (inp.keepPre || e.ts >= session.startedAt) && e.type !== 'console' && e.type !== 'network');
+  const dl = model.devlog;
+  if (dl) {
+    files['console.json'] = strToU8(JSON.stringify(dl.console.map((c) => ({ ts_ms: c.ts - session.startedAt, ts: c.ts, level: c.level, source: c.source, text: c.text, stack: c.stack ?? null })), null, 2));
+    files['network.har'] = strToU8(JSON.stringify(buildHar(dl.network.map((n) => ({ ts: n.ts, net: n })), inp.version, model.title, session.startedAt), null, 2));
+  }
   files['events.json'] = strToU8(
     JSON.stringify(visibleEvents.map((e) => ({ ts_ms: e.ts - session.startedAt, ts: e.ts, type: e.type, target: e.origin ? { kind: 'web', origin: e.origin, path: e.path } : undefined, element: e.element, value: null, label: e.label, system: e.system, source: e.source, confidence: e.confidence })), null, 2),
   );
@@ -62,6 +69,15 @@ export async function buildEvidencePackage(inp: PackageInput): Promise<Blob> {
     last_committed: session.lastCommittedAt ? new Date(session.lastCommittedAt).toISOString() : null,
     pre_session_context: session.preContext ? { present: true, kept: inp.keepPre, seconds: Math.round((session.preContext.endWall - session.preContext.startWall) / 1000) } : { present: false },
     video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, pauses_not_recorded: video.clock.pauses.map((p) => ({ from_wall_ms: p.fromWall, to_wall_ms: p.toWall, reason: p.reason ?? null, shown_at_ms: Math.round(p.atMs), shown_for_ms: p.holdMs })), redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : false, click_highlights: !!inp.clickHighlights } : null,
+    console_network_log: dl
+      ? {
+          console_entries: dl.console.length,
+          requests: dl.network.length,
+          problems: dl.problems.length,
+          redaction_rules: REDACTION_RULES,
+          never_collected: ['request and response bodies', 'headers', 'cookies', 'query values', 'URL fragments', 'storage'],
+        }
+      : null,
     screenshots: shots.map((sh) => ({ id: sh.id, annotated: (sh.annotations?.length ?? 0) > 0, redacted: hasRedaction(sh.annotations), original_included: Object.keys(inp.extraFiles ?? {}).some((k) => k.startsWith('screenshots/originals/') && k.includes(sh.id)) })),
     notes: 'sha256 values are integrity metadata only, not a claim of forensic chain-of-custody. Redacted screenshots are exported flattened; originals are included only when the exporter asked for them.',
     artifacts,

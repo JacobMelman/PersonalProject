@@ -194,6 +194,15 @@ body.review{background:var(--canvas)}
 .tl.marker .ic{background:color-mix(in srgb,var(--amber) 18%,var(--surface));color:var(--amber)} .tl.screenshot .ic{background:color-mix(in srgb,var(--green) 15%,var(--surface));color:var(--green)}
 .tl.system .ic{background:var(--surface-3);color:var(--text-3)} .tl.system .tx{color:var(--text-2);font-style:italic}
 .tl .tx{font-size:13px;line-height:1.5;padding-top:2px;min-width:0;overflow-wrap:anywhere}
+.tl.console .ic,.tl.network .ic{background:color-mix(in srgb,var(--red) 14%,var(--surface));color:var(--red-ink)} .tl.console .tx,.tl.network .tx{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:12px}
+.lgbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}.lgbar .seg .badge{height:16px;padding:0 5px;margin-left:2px}
+.loglist{max-height:360px;overflow:auto;margin:0 -6px;padding:2px 6px;scrollbar-width:thin}
+.lg{display:grid;grid-template-columns:50px 74px 1fr;gap:8px;align-items:start;padding:6px 8px;border-radius:9px;cursor:pointer}
+.lg:hover,.lg:focus-visible{background:var(--surface-2)} .lg .t{font:600 12px/1.7 var(--font);font-variant-numeric:tabular-nums;color:var(--text-3);text-align:right}
+.lg .badge{justify-self:start;margin-top:2px;max-width:74px;overflow:hidden;text-overflow:ellipsis}
+.lg .m{font:12px/1.55 var(--mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);min-width:0;overflow-wrap:anywhere;color:var(--text)}
+.lg .m small{display:block;color:var(--text-3);white-space:pre-wrap;font-size:11px;margin-top:1px}
+.lg.bad .m{color:var(--red-ink)} .lg.warn .m{color:var(--amber-ink)}
 .tl .tx small{display:block;color:var(--text-3);font-size:11.5px}
 .steps{margin:0;padding:0;list-style:none;counter-reset:s;display:grid;gap:8px}
 .steps li{counter-increment:s;display:grid;grid-template-columns:26px 1fr auto auto;gap:10px;align-items:start;font-size:13px}

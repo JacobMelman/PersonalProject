@@ -10,8 +10,9 @@ Privacy-first bug capture for enterprise web QA (Chrome Manifest V3). Implements
 * **Repro Session** - Start / Pause / Resume / Finish, optional 30 s Pre-session Context, named markers with asynchronous screenshots.
 * **Screenshot-only** mode, **Privacy Pause**, **AFK**, **Target Ended**, **Recovered Session**, each with an explicit visible state.
 * **Review** page: replay with click highlights (a ring where the user clicked, also in the exported video; the recording itself is unchanged), raw timeline, draft steps from observed actions (each can be renamed in the reporter's own words; the observed action stays next to it, also in exports), report fields, export to HTML / TXT / Markdown / DOCX / XLSX / ZIP Evidence Package.
+* **Console & network log** (opt-in, off by default): console messages, uncaught errors, rejected promises and request metadata (method, URL without query values, status, timing) of the approved target, recorded on the replay's clock by a page-world script, filtered before storage (secrets, emails, card numbers, tokens; never bodies, headers or cookies). Errors and failed requests appear on the timeline and in every report; the ZIP adds `console.json` and a HAR file for Chrome DevTools. Research and design: `docs/DEVTOOLS_CAPTURE_PLAN.md`.
 * **Privacy tools before anything leaves the device** - a screenshot editor (arrow, shapes, text, mosaic blur, black box; non-destructive) and video tools (time-ranged blur / black-box masks, cut-out ranges, exact-export preview). The stored evidence is never modified; the unredacted original is exported only on explicit request.
-* **Administrator policies** (managed storage; Group Policy / Intune / MDM / JSON): allowed and blocked sites, fixed capture settings, video off (Screenshot-only), export formats and confirmation, no unredacted originals, retention, sample switch. Guide: `docs/ADMIN_POLICY.md`; deployment files: `node scripts/gen-policy.mjs`.
+* **Administrator policies** (managed storage; Group Policy / Intune / MDM / JSON): allowed and blocked sites, fixed capture settings, video off (Screenshot-only), console & network log on / off, export formats and confirmation, no unredacted originals, retention, sample switch. Guide: `docs/ADMIN_POLICY.md`; deployment files: `node scripts/gen-policy.mjs`.
 * **Sample sessions** (Settings -> Sample data): a pre-recorded run of the demo shop, labelled and removable, for trying everything without recording.
 * Data minimisation by construction: no keyboard events, no clipboard, no editable values, URLs reduced to origin + path, no audio/mic/camera, everything local.
 
@@ -31,11 +32,12 @@ ReproDesk on another computer.
 src/background   service worker: state machine side effects, arming, sessions, markers, screenshots, recovery
 src/offscreen    tab capture -> WebCodecs encoder -> GOP segments (OPFS + IndexedDB), screenshot grab
 src/content      privacy-filtered DOM/navigation collector (top frame only)
+src/pagelog      page-world recorder for the opt-in console & network log (filtered in the service worker before storage)
 src/sidepanel    controller UI: state, controls, settings, diagnostics
 src/review       review + export UI, screenshot editor, privacy tools
 src/report       Report Model + renderers (html, txt/md, docx, xlsx) + Evidence Package + WebM muxing + redacted video re-encode
 src/demo         sample-session loader (bundle in public/sample)
-src/shared       policy (parse/match/enforce rules), state machine, privacy filters, ring-buffer rules, types, settings, annotations, video edits, sender/origin validation
+src/shared       policy (parse/match/enforce rules), state machine, privacy filters, console & network log filters + HAR, ring-buffer rules, types, settings, annotations, video edits, sender/origin validation
 src/storage      IndexedDB wrapper, OPFS wrapper, segment storage
 tests/unit       Vitest (state machine, privacy filters, ring rules, filenames, report layer)
 tests/e2e        Playwright against a local fixture site, real Chromium + real tab capture (flow, exports, recovery, annotate, video-redact, sample, a11y)

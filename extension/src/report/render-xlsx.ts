@@ -2,6 +2,10 @@
 import { strToU8, zipSync } from 'fflate';
 import type { ReportModel } from './model';
 import { formatClock } from '../shared/filename';
+import { consoleText, netStatus } from '../shared/devlog';
+
+/** Sheet rows per log (Excel copes with far more, but a report should open quickly). */
+const XLSX_LOG_ROWS = 5000;
 
 const x = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
 const col = (i: number) => String.fromCharCode(65 + i);
@@ -25,7 +29,11 @@ export function renderXlsx(m: ReportModel): Blob {
   ];
   const steps: string[][] = [['#', 'Time', 'Step', 'Observed action (when renamed)'], ...m.steps.map((s) => [String(s.n), s.rel, s.text, s.renamed ? s.observed : ''])];
   const timeline: string[][] = [['Time', 'Type', 'Event'], ...m.timeline.map((t) => [t.rel, t.type, t.text])];
-  const sheets = [['Report', meta, [24, 90]], ['Steps', steps, [6, 10, 70, 60]], ['Timeline', timeline, [10, 12, 90]]] as const;
+  const sheets: Array<readonly [string, string[][], number[]]> = [['Report', meta, [24, 90]], ['Steps', steps, [6, 10, 70, 60]], ['Timeline', timeline, [10, 12, 90]]];
+  if (m.devlog) {
+    sheets.push(['Console', [['Time', 'Level', 'Message', 'Stack'], ...m.devlog.console.slice(0, XLSX_LOG_ROWS).map((c) => [c.rel, c.level, consoleText(c), c.stack ?? ''])], [10, 8, 90, 60]]);
+    sheets.push(['Network', [['Time', 'Method', 'URL', 'Status', 'Duration (ms)', 'Size (bytes)', 'Type'], ...m.devlog.network.slice(0, XLSX_LOG_ROWS).map((n) => [n.rel, n.method, n.url, netStatus(n), String(n.ms), n.size != null ? String(n.size) : '', n.kind === 'resource' ? (n.initiator ?? 'resource') : n.kind])], [10, 8, 80, 8, 12, 12, 10]]);
+  }
   const files: Record<string, Uint8Array> = {
     '[Content_Types].xml': strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`),
     '_rels/.rels': strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
@@ -33,6 +41,6 @@ export function renderXlsx(m: ReportModel): Blob {
     'xl/_rels/workbook.xml.rels': strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_s, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`),
     'xl/styles.xml': strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>'),
   };
-  sheets.forEach((s, i) => (files[`xl/worksheets/sheet${i + 1}.xml`] = strToU8(sheet(s[1] as unknown as string[][], s[2] as unknown as number[]))));
+  sheets.forEach((s, i) => (files[`xl/worksheets/sheet${i + 1}.xml`] = strToU8(sheet(s[1], s[2]))));
   return new Blob([zipSync(files) as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }

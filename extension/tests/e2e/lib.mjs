@@ -14,6 +14,13 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function startSite(port) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
+    // A tiny API for the console & network log test: /api/ok 200, /api/fail 500, anything else under /api 404.
+    if (url.pathname.startsWith('/api/')) {
+      const status = url.pathname === '/api/ok' ? 200 : url.pathname === '/api/fail' ? 500 : 404;
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status, secret: 'never-stored-body' }));
+      return;
+    }
     const file = url.pathname === '/popup.html' ? 'popup.html' : 'index.html'; // SPA fallback
     res.writeHead(200, { 'content-type': 'text/html' });
     res.end(readFileSync(path.join(root, 'site', file)));

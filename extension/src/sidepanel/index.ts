@@ -158,6 +158,8 @@ function managedRules(): string[] {
   if (policy.allowedTargetOrigins) out.push(`ReproDesk can be armed only on: ${policy.allowedTargetOrigins.join(', ')}`);
   if (policy.blockedOrigins.length) out.push(`Never on: ${policy.blockedOrigins.join(', ')}`);
   if (policy.settings.captureVideo === false) out.push('Video capture is not allowed (Screenshot-only mode)');
+  if (policy.settings.captureLogs === true) out.push('The console & network log is always recorded (filtered, no bodies or headers)');
+  if (policy.settings.captureLogs === false) out.push('The console & network log is turned off');
   if (policy.allowedExportFormats) out.push(`Exports limited to: ${policy.allowedExportFormats.map((f) => f.toUpperCase()).join(', ') || 'none'}`);
   if (!policy.allowUnredactedOriginals) out.push('Unredacted original screenshots cannot be exported');
   if (policy.requireExportConfirmation) out.push('Every export asks for confirmation');
@@ -180,6 +182,7 @@ function settingsView(): string {
     ${row('AFK suspend', 'After this idle time (locked = immediately)' + lk('afkMinutes'), seg('afkMinutes', [[0, 'Off'], [5, '5m'], [10, '10m'], [15, '15m'], [30, '30m']]))}
     ${row('Marker screenshots', 'Capture a screenshot with every marker' + lk('markerScreenshot'), sw('markerScreenshot', 'Marker screenshots'))}
     ${row('Video capture', (policy.settings.captureVideo === false ? 'Forbidden: Screenshot-only mode' : 'Off = Screenshot-only (applies when arming)') + lk('captureVideo'), sw('captureVideo', 'Video capture'))}
+    ${row('Console &amp; network log', (policy.settings.captureLogs === true ? 'Always recorded: console errors and request metadata, filtered' : 'Console messages and requests of the target, filtered on this device (no bodies, headers or query values)') + lk('captureLogs'), sw('captureLogs', 'Console and network log'))}
     ${row('Open report after saving', 'Jump straight to Review', sw('openReviewAfterSave', 'Open report after saving'))}</div></div>
     <div class="section"><h2>Target profile</h2><div class="card drawer">
     <div class="field" style="margin-top:10px"><label>Environment</label><input class="input" type="text" aria-label="Environment" data-s="environment" value="${esc(settings.environment)}" ${isLocked('environment') ? 'disabled' : ''}>${isLocked('environment') ? `<span class="hint">${icon('lock')}set by your organization</span>` : ''}</div>

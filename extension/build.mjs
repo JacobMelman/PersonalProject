@@ -29,7 +29,7 @@ await build({
   },
   format: 'esm',
 });
-await build({ ...common, entryPoints: { content: 'src/content/index.ts' }, format: 'iife' });
+await build({ ...common, entryPoints: { content: 'src/content/index.ts', pagelog: 'src/pagelog/index.ts' }, format: 'iife' });
 
 for (const f of ['sidepanel.html', 'review.html', 'offscreen.html', 'styles.css']) {
   cpSync(new URL(`./public/${f}`, import.meta.url).pathname, outdir + f);

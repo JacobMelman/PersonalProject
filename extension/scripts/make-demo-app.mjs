@@ -1,5 +1,6 @@
 // Builds demo-app/index.html from the template, inlining Lucide icons. The demo shop contains two DELIBERATE bugs for the presentation:
-// the promo discount is displayed but not subtracted from the total, and "Place order" always fails with E-4021.
+// the promo discount is displayed but not subtracted from the total, and "Place order" always fails with E-4021 (its API call
+// POST /api/orders gets a 502 from the demo servers and the page logs the error, for the console & network log).
 import { readFileSync, writeFileSync } from 'node:fs';
 const dir = new URL('../', import.meta.url);
 let html = readFileSync(new URL('scripts/demo-app.template.html', dir), 'utf8');

@@ -1,6 +1,7 @@
 // Platform-neutral Report Model: every renderer (HTML/TXT/Markdown/DOCX/XLSX/ZIP) consumes this, never raw capture internals.
 import type { ElementDescriptor, ReportRecord, ScreenshotItem, SessionRecord, TimelineEvent } from '../shared/types';
 import { formatClock } from '../shared/filename';
+import { consoleText, isConsoleProblem, isNetProblem, netText, type ConsoleEntry, type NetEntry } from '../shared/devlog';
 
 export interface Step {
   n: number;
@@ -37,6 +38,20 @@ export interface ShotRef {
   height: number;
   data?: Uint8Array;
 }
+export interface ConsoleRow extends ConsoleEntry {
+  ts: number;
+  rel: string;
+}
+export interface NetRow extends NetEntry {
+  ts: number;
+  rel: string;
+}
+/** The Console & network log as a report carries it: every kept entry, plus the problems a reader should look at first. */
+export interface DevLog {
+  console: ConsoleRow[];
+  network: NetRow[];
+  problems: Array<{ ts: number; rel: string; kind: 'console' | 'network'; text: string }>;
+}
 export interface ReportModel {
   title: string;
   environment: string;
@@ -59,6 +74,8 @@ export interface ReportModel {
   timeline: Array<{ rel: string; type: string; text: string }>;
   video: { filename: string; startWall: number; durationMs: number; codec: string; width: number; height: number } | null;
   videoNote: string | null;
+  /** null: the session has no console / network entries, or the exporter left them out. */
+  devlog: DevLog | null;
 }
 
 export const SESSION_TYPE: Record<string, string> = { instant: 'Instant Replay', repro: 'Repro Session', screenshot: 'Screenshot-only' };
@@ -70,8 +87,15 @@ export function describeElement(el: ElementDescriptor | undefined): string {
   return `${role}${name}`;
 }
 
+export const isLogEvent = (e: TimelineEvent): boolean => e.type === 'console' || e.type === 'network';
+/** A log entry the timeline shows next to the actions: console errors, uncaught errors and failed requests (the rest stays in the log). */
+export const isLogProblem = (e: TimelineEvent): boolean => (e.type === 'console' && !!e.log && isConsoleProblem(e.log)) || (e.type === 'network' && !!e.net && isNetProblem(e.net));
+export const onTimeline = (e: TimelineEvent): boolean => !isLogEvent(e) || isLogProblem(e);
+
 function eventText(e: TimelineEvent): string {
   switch (e.type) {
+    case 'console': return e.log ? (e.log.source === 'console' ? `Console ${e.log.level}: ${e.log.text}` : consoleText(e.log)) : 'Console message';
+    case 'network': return e.net ? `Request failed: ${netText(e.net)}` : 'Request';
     case 'click': return `Click ${describeElement(e.element)}${e.path ? ` on ${e.path}` : ''}`;
     case 'focus': return `Focus ${describeElement(e.element)}`;
     case 'submit': return `Submit ${describeElement(e.element)}`;
@@ -110,6 +134,8 @@ export interface BuildInput {
   report: ReportRecord;
   videoInfo: ReportModel['video'];
   keepPre: boolean;
+  /** Leave the Console & network log out of this report (default: in). */
+  excludeLogs?: boolean;
 }
 
 export function buildReportModel(inp: BuildInput): ReportModel {
@@ -117,7 +143,9 @@ export function buildReportModel(inp: BuildInput): ReportModel {
   const t0 = session.startedAt;
   const rel = (ts: number) => (ts < t0 ? `-${formatClock(t0 - ts)}` : formatClock(ts - t0));
   const pre = session.preContext;
-  const visible = events.filter((e) => keepPre || e.ts >= t0).sort((a, b) => a.ts - b.ts);
+  const all = events.filter((e) => keepPre || e.ts >= t0).sort((a, b) => a.ts - b.ts);
+  const visible = all.filter((e) => (inp.excludeLogs ? !isLogEvent(e) : onTimeline(e)));
+  const logs = inp.excludeLogs ? [] : all.filter(isLogEvent);
   const endNote =
     session.status === 'target_ended'
       ? `Capture ended because the target became unavailable${session.endReason ? ` (${session.endReason})` : ''}.${session.classification ? ` Reviewer classification: ${session.classification}${session.classificationNote ? ` - ${session.classificationNote}` : ''}.` : ''}`
@@ -150,6 +178,13 @@ export function buildReportModel(inp: BuildInput): ReportModel {
     timeline: visible.map((e) => ({ rel: rel(e.ts), type: e.type, text: eventText(e) })),
     video: inp.videoInfo,
     videoNote: session.videoFailure ?? null,
+    devlog: logs.length
+      ? {
+          console: logs.filter((e) => e.type === 'console' && e.log).map((e) => ({ ts: e.ts, rel: rel(e.ts), ...e.log! })),
+          network: logs.filter((e) => e.type === 'network' && e.net).map((e) => ({ ts: e.ts, rel: rel(e.ts), ...e.net! })),
+          problems: logs.filter(isLogProblem).map((e) => ({ ts: e.ts, rel: rel(e.ts), kind: e.type as 'console' | 'network', text: eventText(e) })),
+        }
+      : null,
   };
 }
 

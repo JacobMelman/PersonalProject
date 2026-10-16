@@ -32,6 +32,14 @@ describe('parsePolicy', () => {
   it('VideoCaptureAllowed=true does not force video on', () => {
     expect(parsePolicy({ VideoCaptureAllowed: true }).settings).toEqual({});
   });
+  it('ConsoleNetworkLog fixes the console & network log either way, and anything else is ignored', () => {
+    expect(parsePolicy({ ConsoleNetworkLog: true }).settings).toEqual({ captureLogs: true });
+    expect(parsePolicy({ ConsoleNetworkLog: false }).settings).toEqual({ captureLogs: false });
+    expect(parsePolicy({ ConsoleNetworkLog: 'yes' }).settings).toEqual({});
+    expect(lockedKeys(parsePolicy({ ConsoleNetworkLog: false }))).toEqual(['captureLogs']);
+    expect(validateRawPolicy({ ConsoleNetworkLog: 1 })).toEqual(['ConsoleNetworkLog must be true or false']);
+    expect(validateRawPolicy({ ConsoleNetworkLog: true })).toEqual([]);
+  });
   it('an export list with no known format means none allowed (fail closed)', () => {
     expect(parsePolicy({ AllowedExportFormats: ['pdf'] }).allowedExportFormats).toEqual([]);
     expect(allowedFormats(parsePolicy({ AllowedExportFormats: ['pdf'] }))).toEqual([]);

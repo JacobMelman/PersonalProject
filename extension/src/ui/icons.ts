@@ -68,6 +68,8 @@ import i_lock_keyhole from 'lucide-static/icons/lock-keyhole.svg';
 import i_shield_alert from 'lucide-static/icons/shield-alert.svg';
 import i_droplets from 'lucide-static/icons/droplets.svg';
 import i_circle_check from 'lucide-static/icons/circle-check.svg';
+import i_square_terminal from 'lucide-static/icons/square-terminal.svg';
+import i_arrow_left_right from 'lucide-static/icons/arrow-left-right.svg';
 
 const raw = {
   'circle-dot': i_circle_dot,
@@ -139,6 +141,8 @@ const raw = {
   'shield-alert': i_shield_alert,
   'droplets': i_droplets,
   'circle-check': i_circle_check,
+  'square-terminal': i_square_terminal,
+  'arrow-left-right': i_arrow_left_right,
 } as const;
 
 export type IconName = keyof typeof raw;

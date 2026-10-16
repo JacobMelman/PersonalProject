@@ -12,6 +12,12 @@ const types = { '.html': 'text/html; charset=utf-8', '.woff2': 'font/woff2' };
 const server = http.createServer((req, res) => {
   let p = '/';
   try { p = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch { /* malformed: serve the shop */ }
+  // The shop's API: every call fails like a payment gateway that does not answer (deliberate bug 2, E-4021).
+  if (p.startsWith('/api/')) {
+    res.writeHead(502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ error: 'E-4021', message: 'Payment gateway did not answer' }));
+    return;
+  }
   const f = path.join(root, p);
   // The shop is a single page: fonts are real files, every other path gets index.html (the page routes itself).
   const file = p.startsWith('/fonts/') && f.startsWith(root + path.sep) && existsSync(f) && statSync(f).isFile() ? f : path.join(root, 'index.html');

@@ -6,10 +6,11 @@ import { evaluateTarget, isOriginBlocked, selectExpired } from '../shared/policy
 import { isApprovedOrigin, minimizeUrl } from '../shared/privacy';
 import { FRAME_PORT_NAME, PORT_NAME, type ContentMessage, type OffscreenEvent, type OffscreenOp, type PinResult } from '../shared/messages';
 import type { CaptureState, HealthSnapshot, ScreenshotItem, SessionKind, SessionRecord, Settings, TimelineEvent } from '../shared/types';
-import { dbAdd, dbDelete, dbDeleteWhereSession, dbGet, dbGetAll, dbIndexAll, dbPut, eventsOfSession, deleteEventsRange } from '../storage/db';
+import { dbAdd, dbAddMany, dbDelete, dbDeleteWhereSession, dbGet, dbGetAll, dbIndexAll, dbPut, eventsOfSession, deleteEventsRange } from '../storage/db';
 import { opfsRemove, opfsWrite } from '../storage/opfs';
 import { cleanupRing, segmentsOfSession, unpinSession } from '../storage/segments';
 import { isOwnContentScript } from '../shared/trust';
+import { droppedInBatch, LOG_LIMITS, LogBudget, sanitizeRaw } from '../shared/devlog';
 
 const STATE_KEY = 'state';
 const RECOVERED_RETENTION_MS = 7 * 24 * 3600 * 1000;
@@ -144,11 +145,14 @@ async function finalizeSession(id: string, patch: Partial<SessionRecord>): Promi
 
 async function copyRingEvents(sessionId: string, from: number, to: number): Promise<number> {
   const evs = await eventsOfSession<TimelineEvent>('ring', from, to);
-  for (const e of evs) {
-    const { id: _id, ...rest } = e;
-    void _id;
-    await dbAdd('events', { ...rest, sessionId });
-  }
+  await dbAddMany(
+    'events',
+    evs.map((e) => {
+      const { id: _id, ...rest } = e;
+      void _id;
+      return { ...rest, sessionId };
+    }),
+  );
   return evs.length;
 }
 
@@ -187,6 +191,8 @@ async function onTransition(prev: CaptureState, next: CaptureState, e: StateEven
     await sendOff(collecting(next) ? { kind: 'off', op: 'resume' } : { kind: 'off', op: 'pause', reason: next.privacy ? 'privacy' : next.manual ? 'manual' : next.afk ? 'afk' : undefined });
   }
   if (!prev.terminal && next.terminal) await handleTerminal(prev, next, e);
+  const live = (x: CaptureState) => x.mode !== 'inactive' && !x.terminal;
+  if (live(prev) !== live(next) || prev.targetOrigin !== next.targetOrigin) await syncPageLogScript();
 }
 
 async function handleTerminal(prev: CaptureState, next: CaptureState, e: StateEvent): Promise<void> {
@@ -233,17 +239,55 @@ export async function reevaluate(): Promise<void> {
 }
 
 export async function injectContent(tabId: number): Promise<boolean> {
+  let ok = false;
   try {
     await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] });
-    return true;
+    ok = true;
   } catch {
     try {
       await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }); // some frame refused: top document at least
-      return true;
+      ok = true;
     } catch {
-      return false;
+      ok = false;
     }
   }
+  if (ok) await injectPageLog(tabId);
+  return ok;
+}
+
+/**
+ * Console & network log: the page recorder runs in the page's own world (only there are its console and fetch visible). Injected
+ * only while the log is switched on; guarded in the page, so injecting again is harmless. `injectImmediately` lets it start as
+ * early as possible on a page that is still loading; requests made before it arrived are recovered from resource timing.
+ */
+export async function injectPageLog(tabId: number): Promise<void> {
+  if (!(await getSettings()).captureLogs) return;
+  const url = minimizeUrl((await chrome.tabs.get(tabId).catch(() => null))?.url);
+  if (url && !isApprovedOrigin(url.origin, await approved(await getState()))) return; // never on a page outside the approved scope
+  const run = (allFrames: boolean) => chrome.scripting.executeScript({ target: { tabId, allFrames }, files: ['pagelog.js'], world: 'MAIN', injectImmediately: true });
+  await run(true).catch(() => run(false)).catch(() => undefined);
+}
+
+const PAGELOG_SCRIPT_ID = 'rd-pagelog';
+/**
+ * Where the user granted host access (Remember this site), the recorder is also registered at document_start for the approved
+ * origins while capture runs with the log on, so a reload is covered from its first line. With activeTab alone this is not
+ * possible and the injection above is all there is. Unregistered again on disarm or when the log is switched off.
+ */
+export async function syncPageLogScript(): Promise<void> {
+  await chrome.scripting.unregisterContentScripts({ ids: [PAGELOG_SCRIPT_ID] }).catch(() => undefined);
+  const s = await getState();
+  const on = (await getSettings()).captureLogs;
+  await noteLogSetting(on);
+  if (s.mode === 'inactive' || s.terminal || !on) return;
+  const matches: string[] = [];
+  for (const o of await approved(s)) {
+    if (/^https?:\/\/[^/]+$/.test(o) && (await chrome.permissions.contains({ origins: [`${o}/*`] }).catch(() => false))) matches.push(`${o}/*`);
+  }
+  if (!matches.length) return;
+  await chrome.scripting
+    .registerContentScripts([{ id: PAGELOG_SCRIPT_ID, matches, js: ['pagelog.js'], runAt: 'document_start', world: 'MAIN', allFrames: true, persistAcrossSessions: false }])
+    .catch(() => undefined);
 }
 
 // ---------------------------------------------------------------- arm / disarm
@@ -530,6 +574,11 @@ export function onPort(port: chrome.runtime.Port): void {
 
 /** Events from iframes: same rules as the top document - approved origin only, and only while collecting. */
 async function onFrameMessage(tabId: number, msg: ContentMessage): Promise<void> {
+  if (msg.t === 'logs') {
+    const s = await getState();
+    if (s.targetTabId === tabId) await recordLogs(tabId, msg, s, true);
+    return;
+  }
   if (msg.t !== 'event') return;
   const s = await getState();
   if (s.targetTabId !== tabId || !collectingSemantics(s)) return;
@@ -562,12 +611,59 @@ async function onContentMessage(tabId: number, port: chrome.runtime.Port, msg: C
     return;
   }
   if (info) info.seenAt = Date.now();
+  if (msg.t === 'logs') {
+    await recordLogs(tabId, msg, s, false);
+    return;
+  }
   if (msg.t === 'event') {
     if (!collectingSemantics(s)) return; // dropped while paused / AFK / ended
     const origins = await approved(s);
     if (msg.ev.origin && !isApprovedOrigin(msg.ev.origin, origins)) return;
     await recordEvent({ ...msg.ev, tabId }, s);
   }
+}
+
+// Console & network log: kept only while semantics are collected, only with the log switched on (by the user or the policy), only
+// from approved origins, filtered and bounded before anything is stored, and capped per minute. Same lifecycle as other events:
+// ring while Armed, pinned into a session on save, deleted with it.
+const logBudget = new LogBudget();
+/** When the log was last switched on (by the user or the policy); kept in session storage so a recycled worker still knows it. */
+async function logsOnSince(): Promise<number> {
+  return ((await chrome.storage.session.get('logsOnSince')).logsOnSince as number | undefined) ?? 0;
+}
+export async function noteLogSetting(on: boolean): Promise<void> {
+  const since = (await chrome.storage.session.get('logsOnSince')).logsOnSince as number | undefined;
+  if (on && since == null) await chrome.storage.session.set({ logsOnSince: Date.now() });
+  if (!on && since != null) await chrome.storage.session.remove('logsOnSince');
+}
+let lastDropNote = 0;
+async function recordLogs(tabId: number, msg: Extract<ContentMessage, { t: 'logs' }>, s: CaptureState, frame: boolean): Promise<void> {
+  if (!collectingSemantics(s)) return;
+  const settings = await getSettings();
+  if (!settings.captureLogs) return;
+  if (typeof msg.origin !== 'string' || !isApprovedOrigin(msg.origin, await approved(s))) return;
+  const batch = Array.isArray(msg.items) ? msg.items.slice(0, LOG_LIMITS.perBatch + 1) : [];
+  const items = batch.filter((r) => (r as { k?: unknown } | null)?.k !== 'drop');
+  const now = Date.now();
+  logBudget.dropped += droppedInBatch(batch);
+  const keep = logBudget.take(items.length, now);
+  const sessionId = await evidenceSession(s);
+  // Nothing from before the log was switched on: resource timing can reach back to the page load, which may predate that.
+  const notBefore = Math.max(s.armedAt ?? now, await logsOnSince());
+  const evs: TimelineEvent[] = [];
+  for (const raw of items.slice(0, keep)) {
+    const c = sanitizeRaw(raw, msg.origin + '/', now, notBefore);
+    if (!c) continue;
+    const base = { sessionId, ts: c.ts, tabId, origin: msg.origin, ...(frame ? { frame: true } : {}) };
+    evs.push('console' in c ? { ...base, type: 'console', log: c.console } : { ...base, type: 'network', net: c.net });
+  }
+  await dbAddMany('events', evs);
+  if (logBudget.dropped && now - lastDropNote > 60_000) {
+    lastDropNote = now;
+    await systemEvent('Console & network log limit reached', `${logBudget.dropped} entries were not kept (at most ${LOG_LIMITS.perMinute} a minute)`);
+    logBudget.dropped = 0;
+  }
+  await cleanupRingEvents(settings);
 }
 
 // ---------------------------------------------------------------- off-screen events, tab events, idle, alarms
@@ -596,6 +692,7 @@ export async function onTabUpdated(tabId: number, info: chrome.tabs.OnUpdatedInf
   if (s.targetTabId !== tabId || s.mode === 'inactive' || s.terminal) return;
   // Same-document (SPA) navigations also report status changes, so this only re-evaluates (it does not pause by itself):
   // a real document change shows up as a missing heartbeat / a visible URL that is not approved.
+  if (info.status === 'loading') await injectPageLog(tabId); // as early as the new document allows; a no-op when the log is off
   if (info.status === 'complete') await injectContent(tabId); // guarded in the page: injecting twice is harmless
   await reevaluate();
   // The frozen-page (bfcache) case produces no further events, so look again once the heartbeat is certainly stale.

@@ -81,6 +81,7 @@ var DEFAULT_SETTINGS = {
   captureVideo: !0,
   openReviewAfterSave: !0,
   highlightClicks: !0,
+  captureLogs: !1,
   approvedOrigins: [],
   environment: "QA"
 };
@@ -109,7 +110,9 @@ function parsePolicy(raw) {
   let afk = oneOf(r.AfkAutoPauseMinutes, [0, 5, 10, 15, 30]);
   afk !== void 0 && (settings.afkMinutes = afk);
   let marker = bool(r.MarkerScreenshots);
-  marker !== void 0 && (settings.markerScreenshot = marker), bool(r.VideoCaptureAllowed) === !1 && (settings.captureVideo = !1), typeof r.EnvironmentLabel == "string" && r.EnvironmentLabel.trim() && (settings.environment = r.EnvironmentLabel.trim().slice(0, 60));
+  marker !== void 0 && (settings.markerScreenshot = marker), bool(r.VideoCaptureAllowed) === !1 && (settings.captureVideo = !1);
+  let logs = bool(r.ConsoleNetworkLog);
+  logs !== void 0 && (settings.captureLogs = logs), typeof r.EnvironmentLabel == "string" && r.EnvironmentLabel.trim() && (settings.environment = r.EnvironmentLabel.trim().slice(0, 60));
   let allowed = strings(r.AllowedTargetOrigins), fmts = strings(r.AllowedExportFormats), days = typeof r.SessionRetentionDays == "number" && Number.isFinite(r.SessionRetentionDays) ? Math.min(3650, Math.max(0, Math.floor(r.SessionRetentionDays))) : 0, p = {
     managed: !1,
     allowedTargetOrigins: allowed && allowed.length ? allowed : null,
@@ -236,6 +239,12 @@ async function dbAdd(store, value) {
   let tx = (await openDb()).transaction(store, "readwrite"), key = await wrap(tx.objectStore(store).add(value));
   return await done(tx), key;
 }
+async function dbAddMany(store, values) {
+  if (!values.length) return;
+  let tx = (await openDb()).transaction(store, "readwrite"), os = tx.objectStore(store);
+  for (let v of values) os.add(v);
+  await done(tx);
+}
 async function dbGet(store, key) {
   let db = await openDb();
   return wrap(db.transaction(store).objectStore(store).get(key));
@@ -338,6 +347,115 @@ function isRememberableOrigin(origin) {
   return typeof origin == "string" && origin.length <= 253 && /^https?:\/\/(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*|\[[0-9a-f:]+\])(?::\d{1,5})?$/i.test(origin);
 }
 
+// src/shared/devlog.ts
+var LOG_LIMITS = {
+  text: 1e3,
+  stackLines: 8,
+  stack: 1500,
+  url: 400,
+  perBatch: 200,
+  perMinute: 1200,
+  /** Entries older than this when they arrive are ignored (resource timing can go back to the page load). */
+  maxAgeMs: 6e4
+};
+var JWT = /\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}/g, AUTH_HEADER = /\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, CARD = /(?<![\d.])[2-6](?:[ -]?\d){12,18}(?![\d.])/g, LONG_SECRET = /(?<![\w/.-])(?=[A-Za-z0-9_+/-]*\d)(?=[A-Za-z0-9_+/-]*[A-Za-z])[A-Za-z0-9_+/-]{32,}={0,2}(?![\w/.-])/g, SECRET_KEY = String.raw`[\w.-]*?(?:password|passwd|passphrase|secret|token|api[_-]?key|apikey|authorization|session[_-]?id|sessid|cookie|credential|private[_-]?key|card[_-]?number|cardnumber|iban)[\w.-]*|auth|pin|otp|cvv|cvc|ssn|sid|pwd|pass`, KEY_VALUE = new RegExp(String.raw`(["']?)\b(${SECRET_KEY})\b\1(\s*[:=]\s*)("[^"]*"|'[^']*'|(?:Bearer|Basic|Token)\s+[^\s,;&}\])]+|[^\s,;&}\])]+)`, "gi");
+function luhn(digits) {
+  let sum = 0, dbl = !1;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = digits.charCodeAt(i) - 48;
+    dbl && (d *= 2, d > 9 && (d -= 9)), sum += d, dbl = !dbl;
+  }
+  return sum % 10 === 0;
+}
+function redactText(s) {
+  return s.replace(JWT, "[jwt]").replace(KEY_VALUE, (_m, q, key, sep, val) => {
+    let quote = val[0] === '"' || val[0] === "'" ? val[0] : "";
+    return `${q}${key}${q}${sep}${quote}[redacted]${quote}`;
+  }).replace(AUTH_HEADER, (_m, scheme) => `${scheme} [token]`).replace(EMAIL, "[email]").replace(CARD, (m) => {
+    let digits = m.replace(/\D/g, "");
+    return digits.length >= 13 && digits.length <= 19 && luhn(digits) ? "[card]" : m;
+  }).replace(LONG_SECRET, "[secret]");
+}
+var clip = (s, max) => s.length > max ? s.slice(0, max - 1) + "\u2026" : s, oneLine = (s) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " "), UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function cleanRequestUrl(href, base) {
+  let u;
+  try {
+    u = new URL(href, base);
+  } catch {
+    return "(invalid URL)";
+  }
+  if (u.protocol === "data:" || u.protocol === "blob:") return `${u.protocol}\u2026`;
+  if (u.protocol !== "http:" && u.protocol !== "https:") return `${u.protocol}\u2026`;
+  let path = u.pathname.split("/").map((seg) => {
+    let d = seg;
+    try {
+      d = decodeURIComponent(seg);
+    } catch {
+    }
+    if (UUID.test(d)) return ":id";
+    if (d.length >= 24 && /\d/.test(d) && /[A-Za-z]/.test(d) && !/\.\w{1,5}$/.test(d)) return ":token";
+    let r = redactText(d);
+    return r === d ? seg : encodeURIComponent(r).replace(/%5B/g, "[").replace(/%5D/g, "]");
+  }).join("/"), names = [.../* @__PURE__ */ new Set([...u.searchParams.keys()])].slice(0, 12).map((k) => clip(k.replace(/[^\w.[\]-]/g, ""), 40)).filter(Boolean), query = names.length ? "?" + names.map((k) => `${k}=\u2026`).join("&") : "";
+  return clip(u.origin + (path || "/") + query, LOG_LIMITS.url);
+}
+var URL_IN_TEXT = /\bhttps?:\/\/[^\s()'"<>]+/g, stripUrlQueries = (s) => s.replace(URL_IN_TEXT, (u) => {
+  let pos = /(:\d+(?::\d+)?)$/.exec(u), tail = pos ? pos[1] : "", body = tail ? u.slice(0, -tail.length) : u, cut = body.search(/[?#]/);
+  return (cut >= 0 ? body.slice(0, cut) : body) + tail;
+}), LEVELS = { error: "error", warn: "warn", warning: "warn", log: "info", info: "info", debug: "debug", trace: "debug", assert: "error" }, SOURCES = ["console", "exception", "rejection"], KINDS = ["document", "fetch", "xhr", "resource"], METHOD = /^[A-Z]{3,7}$/, num = (v, lo, hi) => typeof v == "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : void 0;
+function cleanMessage(args) {
+  let parts = (Array.isArray(args) ? args : []).slice(0, 20).map((a) => typeof a == "string" ? a : a === void 0 ? "undefined" : JSON.stringify(a) ?? String(a)), joined = clip(parts.join(" "), LOG_LIMITS.text * 4);
+  return clip(oneLine(redactText(stripUrlQueries(joined))).replace(/\s+/g, " ").trim(), LOG_LIMITS.text);
+}
+function cleanStack(stack) {
+  if (typeof stack != "string" || !stack.trim()) return;
+  let lines = stack.split(`
+`).map((l) => l.trim()).filter((l) => /^at\s|@/.test(l)).slice(0, LOG_LIMITS.stackLines);
+  if (lines.length)
+    return clip(lines.map((l) => oneLine(redactText(stripUrlQueries(l)))).join(`
+`), LOG_LIMITS.stack);
+}
+function sanitizeRaw(raw, pageUrl, now, notBefore) {
+  if (!raw || typeof raw != "object") return null;
+  let r = raw, ts = num(r.ts, 0, Number.MAX_SAFE_INTEGER);
+  if (ts === void 0 || ts < notBefore || ts > now + 5e3 || now - ts > LOG_LIMITS.maxAgeMs) return null;
+  if (r.k === "c") {
+    let level = LEVELS[String(r.level)];
+    if (!level) return null;
+    let source = SOURCES.includes(r.source) ? r.source : "console", text = cleanMessage(r.args), stack = cleanStack(r.stack);
+    return !text && !stack ? null : { ts: Math.round(ts), console: { level, source, text: text || "(empty message)", ...stack ? { stack } : {} } };
+  }
+  if (r.k === "n") {
+    if (typeof r.url != "string" || !r.url) return null;
+    let kind = KINDS.includes(r.kind) ? r.kind : "resource", method = typeof r.method == "string" && METHOD.test(r.method.toUpperCase()) ? r.method.toUpperCase() : "", status = Math.round(num(r.status, 0, 999) ?? 0), size = num(r.size, 0, 1e12), initiator = typeof r.initiator == "string" && /^[a-z-]{1,24}$/.test(r.initiator) ? r.initiator : void 0, error = ["failed", "aborted", "timeout"].includes(String(r.error)) ? String(r.error) : void 0;
+    return {
+      ts: Math.round(ts),
+      net: { kind, method, url: cleanRequestUrl(r.url, pageUrl), status, ms: Math.round(num(r.ms, 0, 36e5) ?? 0), ...size ? { size: Math.round(size) } : {}, ...initiator ? { initiator } : {}, ...error ? { error } : {} }
+    };
+  }
+  return null;
+}
+function droppedInBatch(items) {
+  let n = 0;
+  for (let r of items) r && typeof r == "object" && r.k === "drop" && (n += Math.min(1e6, Math.max(0, Math.floor(Number(r.n) || 0))));
+  return n;
+}
+var LogBudget = class {
+  constructor(perMinute = LOG_LIMITS.perMinute) {
+    this.perMinute = perMinute;
+  }
+  perMinute;
+  windowStart = 0;
+  used = 0;
+  dropped = 0;
+  /** How many of `n` new entries may be kept now. */
+  take(n, now) {
+    now - this.windowStart >= 6e4 && (this.windowStart = now, this.used = 0);
+    let ok = Math.max(0, Math.min(n, this.perMinute - this.used));
+    return this.used += ok, this.dropped += n - ok, ok;
+  }
+};
+
 // src/background/core.ts
 var STATE_KEY = "state", RECOVERED_RETENTION_MS = 168 * 3600 * 1e3, uid = (p = "") => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), chain = Promise.resolve();
 function serial(fn) {
@@ -433,11 +551,13 @@ async function finalizeSession(id, patch) {
 }
 async function copyRingEvents(sessionId, from, to) {
   let evs = await eventsOfSession("ring", from, to);
-  for (let e of evs) {
-    let { id: _id, ...rest } = e;
-    await dbAdd("events", { ...rest, sessionId });
-  }
-  return evs.length;
+  return await dbAddMany(
+    "events",
+    evs.map((e) => {
+      let { id: _id, ...rest } = e;
+      return { ...rest, sessionId };
+    })
+  ), evs.length;
 }
 async function openReview(sessionId) {
   let rec = await dbGet("sessions", sessionId);
@@ -457,6 +577,8 @@ async function onTransition(prev, next, e) {
     for (let [key, label, note] of OVERLAY_LABELS)
       prev[key] !== next[key] && await systemEvent(next[key] ? `${label} start` : `${label} end`, next[key] ? note : void 0, next.sessionId ?? void 0);
   collecting(prev) !== collecting(next) && !next.terminal && await sendOff(collecting(next) ? { kind: "off", op: "resume" } : { kind: "off", op: "pause", reason: next.privacy ? "privacy" : next.manual ? "manual" : next.afk ? "afk" : void 0 }), !prev.terminal && next.terminal && await handleTerminal(prev, next, e);
+  let live = (x) => x.mode !== "inactive" && !x.terminal;
+  (live(prev) !== live(next) || prev.targetOrigin !== next.targetOrigin) && await syncPageLogScript();
 }
 async function handleTerminal(prev, next, e) {
   let reason = e.type === "TARGET_ENDED" || e.type === "ERROR" ? e.reason ?? "" : "", settings = await getSettings(), last = (await dbGet("journal", "health"))?.lastChunkAt ?? Date.now();
@@ -478,15 +600,37 @@ async function reevaluate() {
   !ok && !s.privacy && await dispatch({ type: "PRIVACY_PAUSE" }), ok && s.privacy && await dispatch({ type: "PRIVACY_RESUME" });
 }
 async function injectContent(tabId) {
+  let ok = !1;
   try {
-    return await chrome.scripting.executeScript({ target: { tabId, allFrames: !0 }, files: ["content.js"] }), !0;
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: !0 }, files: ["content.js"] }), ok = !0;
   } catch {
     try {
-      return await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] }), !0;
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] }), ok = !0;
     } catch {
-      return !1;
+      ok = !1;
     }
   }
+  return ok && await injectPageLog(tabId), ok;
+}
+async function injectPageLog(tabId) {
+  if (!(await getSettings()).captureLogs) return;
+  let url = minimizeUrl((await chrome.tabs.get(tabId).catch(() => null))?.url);
+  if (url && !isApprovedOrigin(url.origin, await approved(await getState()))) return;
+  let run = (allFrames) => chrome.scripting.executeScript({ target: { tabId, allFrames }, files: ["pagelog.js"], world: "MAIN", injectImmediately: !0 });
+  await run(!0).catch(() => run(!1)).catch(() => {
+  });
+}
+var PAGELOG_SCRIPT_ID = "rd-pagelog";
+async function syncPageLogScript() {
+  await chrome.scripting.unregisterContentScripts({ ids: [PAGELOG_SCRIPT_ID] }).catch(() => {
+  });
+  let s = await getState(), on = (await getSettings()).captureLogs;
+  if (await noteLogSetting(on), s.mode === "inactive" || s.terminal || !on) return;
+  let matches = [];
+  for (let o of await approved(s))
+    /^https?:\/\/[^/]+$/.test(o) && await chrome.permissions.contains({ origins: [`${o}/*`] }).catch(() => !1) && matches.push(`${o}/*`);
+  matches.length && await chrome.scripting.registerContentScripts([{ id: PAGELOG_SCRIPT_ID, matches, js: ["pagelog.js"], runAt: "document_start", world: "MAIN", allFrames: !0, persistAcrossSessions: !1 }]).catch(() => {
+  });
 }
 async function startCapture(tab, settings) {
   await new Promise((r) => setTimeout(r, 450));
@@ -691,6 +835,11 @@ function onPort(port) {
   }));
 }
 async function onFrameMessage(tabId, msg) {
+  if (msg.t === "logs") {
+    let s2 = await getState();
+    s2.targetTabId === tabId && await recordLogs(tabId, msg, s2, !0);
+    return;
+  }
   if (msg.t !== "event") return;
   let s = await getState();
   if (s.targetTabId !== tabId || !collectingSemantics(s)) return;
@@ -713,12 +862,40 @@ async function onContentMessage(tabId, port, msg) {
     info && (info.seenAt = 0), await reevaluate();
     return;
   }
-  if (info && (info.seenAt = Date.now()), msg.t === "event") {
+  if (info && (info.seenAt = Date.now()), msg.t === "logs") {
+    await recordLogs(tabId, msg, s, !1);
+    return;
+  }
+  if (msg.t === "event") {
     if (!collectingSemantics(s)) return;
     let origins = await approved(s);
     if (msg.ev.origin && !isApprovedOrigin(msg.ev.origin, origins)) return;
     await recordEvent({ ...msg.ev, tabId }, s);
   }
+}
+var logBudget = new LogBudget();
+async function logsOnSince() {
+  return (await chrome.storage.session.get("logsOnSince")).logsOnSince ?? 0;
+}
+async function noteLogSetting(on) {
+  let since = (await chrome.storage.session.get("logsOnSince")).logsOnSince;
+  on && since == null && await chrome.storage.session.set({ logsOnSince: Date.now() }), !on && since != null && await chrome.storage.session.remove("logsOnSince");
+}
+var lastDropNote = 0;
+async function recordLogs(tabId, msg, s, frame) {
+  if (!collectingSemantics(s)) return;
+  let settings = await getSettings();
+  if (!settings.captureLogs || typeof msg.origin != "string" || !isApprovedOrigin(msg.origin, await approved(s))) return;
+  let batch = Array.isArray(msg.items) ? msg.items.slice(0, LOG_LIMITS.perBatch + 1) : [], items = batch.filter((r) => r?.k !== "drop"), now = Date.now();
+  logBudget.dropped += droppedInBatch(batch);
+  let keep = logBudget.take(items.length, now), sessionId = await evidenceSession(s), notBefore = Math.max(s.armedAt ?? now, await logsOnSince()), evs = [];
+  for (let raw of items.slice(0, keep)) {
+    let c = sanitizeRaw(raw, msg.origin + "/", now, notBefore);
+    if (!c) continue;
+    let base = { sessionId, ts: c.ts, tabId, origin: msg.origin, ...frame ? { frame: !0 } : {} };
+    evs.push("console" in c ? { ...base, type: "console", log: c.console } : { ...base, type: "network", net: c.net });
+  }
+  await dbAddMany("events", evs), logBudget.dropped && now - lastDropNote > 6e4 && (lastDropNote = now, await systemEvent("Console & network log limit reached", `${logBudget.dropped} entries were not kept (at most ${LOG_LIMITS.perMinute} a minute)`), logBudget.dropped = 0), await cleanupRingEvents(settings);
 }
 async function onOffscreenEvent(m) {
   let s = await getState();
@@ -740,7 +917,7 @@ async function onTabRemoved(tabId) {
 }
 async function onTabUpdated(tabId, info) {
   let s = await getState();
-  s.targetTabId !== tabId || s.mode === "inactive" || s.terminal || (info.status === "complete" && await injectContent(tabId), await reevaluate(), recheckTimer && clearTimeout(recheckTimer), recheckTimer = setTimeout(() => {
+  s.targetTabId !== tabId || s.mode === "inactive" || s.terminal || (info.status === "loading" && await injectPageLog(tabId), info.status === "complete" && await injectContent(tabId), await reevaluate(), recheckTimer && clearTimeout(recheckTimer), recheckTimer = setTimeout(() => {
     serial(reevaluate);
   }, LIVENESS_MS + 200));
 }
@@ -890,7 +1067,9 @@ async function registerRememberedSite(origin) {
 var applySettingsChange = () => {
   serial(async () => {
     let next = await getSettings();
-    await enforcePolicyNow(), (await getState()).mode !== "inactive" && (await chrome.idle.setDetectionInterval(Math.max(15, (next.afkMinutes || 10) * 60)), await chrome.runtime.sendMessage({ kind: "off", op: "config", settings: next }).catch(() => {
+    await enforcePolicyNow(), await syncPageLogScript();
+    let s = await getState();
+    s.mode !== "inactive" && (next.captureLogs && s.targetTabId != null && !s.terminal && await injectPageLog(s.targetTabId), await chrome.idle.setDetectionInterval(Math.max(15, (next.afkMinutes || 10) * 60)), await chrome.runtime.sendMessage({ kind: "off", op: "config", settings: next }).catch(() => {
     }));
   });
 };

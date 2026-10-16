@@ -1,5 +1,6 @@
 import { loadEvidence, saveReport, type LoadedEvidence } from '../report/evidence';
-import { buildReportModel, cleanStepText, SESSION_TYPE, STEP_TEXT_MAX, type ReportModel, type Step } from '../report/model';
+import { buildReportModel, cleanStepText, isLogEvent, onTimeline, SESSION_TYPE, STEP_TEXT_MAX, type ReportModel, type Step } from '../report/model';
+import { consoleText, isConsoleProblem, isNetProblem, netStatus } from '../shared/devlog';
 import { muxSessionVideo, type MuxedVideo } from '../report/video';
 import { videoMsToWall, wallToVideoMs } from '../shared/video-clock';
 import { renderEditedVideo } from '../report/video-redact';
@@ -29,7 +30,9 @@ const VERSION = chrome.runtime.getManifest().version;
 const sessionId = new URLSearchParams(location.search).get('session');
 
 const KIND_ICON: Record<string, IconName> = { instant: 'history', repro: 'video', screenshot: 'camera' };
-const TL_ICON: Record<TimelineType, IconName> = { click: 'mouse-pointer-click', navigate: 'navigation', marker: 'flag', screenshot: 'camera', focus: 'text-cursor-input', submit: 'send', system: 'info' };
+const TL_ICON: Record<TimelineType, IconName> = { click: 'mouse-pointer-click', navigate: 'navigation', marker: 'flag', screenshot: 'camera', focus: 'text-cursor-input', submit: 'send', system: 'info', console: 'square-terminal', network: 'arrow-left-right' };
+/** Rows the Console & network panel renders at once; everything is still exported. */
+const LOG_PANEL_ROWS = 400;
 const FORMATS: Array<{ id: string; name: string; sub: string; icon: IconName; on?: boolean }> = [
   { id: 'zip', name: 'Evidence ZIP', sub: 'Video, shots, events, manifest', icon: 'archive', on: true },
   { id: 'html', name: 'HTML', sub: 'Self-contained report', icon: 'file-code-2', on: true },
@@ -76,6 +79,10 @@ async function detail(id: string): Promise<void> {
   let previewing = false;
   let previewUrl = '';
   let maskDraft: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  // Console & network log panel: which tab, problems only, and whether exports carry the log.
+  let logTab: 'console' | 'network' = 'console';
+  let logProblemsOnly = false;
+  let includeLogs = true;
   // Click highlights: drawn over the player and into exported copies, never into the stored recording.
   let showClicks = (await getSettings()).highlightClicks !== false;
   const marks = () => (video ? clickMarks(ev.events, video.clock, video.durationMs, { w: video.width, h: video.height }) : []);
@@ -92,17 +99,47 @@ async function detail(id: string): Promise<void> {
       videoErr = e instanceof Error ? e.message : String(e);
     }
   };
-  const model = (over?: { events?: TimelineEvent[]; shots?: LoadedEvidence['shots']; video?: MuxedVideo | null }): ReportModel => {
+  const model = (over?: { events?: TimelineEvent[]; shots?: LoadedEvidence['shots']; video?: MuxedVideo | null; excludeLogs?: boolean }): ReportModel => {
     const v = over && 'video' in over ? over.video : video;
     return buildReportModel({
-      session: ev.session, events: over?.events ?? ev.events, shots: over?.shots ?? ev.shots, report: ev.report, keepPre,
+      session: ev.session, events: over?.events ?? ev.events, shots: over?.shots ?? ev.shots, report: ev.report, keepPre, excludeLogs: over?.excludeLogs,
       videoInfo: v ? { filename: 'replay.webm', startWall: v.startWall, durationMs: v.durationMs, codec: v.codec, width: v.width, height: v.height } : null,
     });
   };
 
   await buildVideo();
   const shotUrls = ev.shots.map((s) => URL.createObjectURL(new Blob([s.data as BlobPart], { type: 'image/png' })));
-  const visibleEvents = () => ev.events.filter((e) => keepPre || e.ts >= ev.session.startedAt).sort((a, b) => a.ts - b.ts);
+  // The timeline shows actions, markers and system events, plus console errors and failed requests; the full log has its own panel.
+  const visibleEvents = () => ev.events.filter((e) => (keepPre || e.ts >= ev.session.startedAt) && onTimeline(e)).sort((a, b) => a.ts - b.ts);
+  const logEvents = () => ev.events.filter((e) => (keepPre || e.ts >= ev.session.startedAt) && isLogEvent(e)).sort((a, b) => a.ts - b.ts);
+  const relOf = (ts: number) => (ts < ev.session.startedAt ? `-${formatClock(ev.session.startedAt - ts)}` : formatClock(ts - ev.session.startedAt));
+  const logRowsHtml = (): string => {
+    const rows = logEvents().filter((e) => e.type === logTab && (!logProblemsOnly || (e.log ? isConsoleProblem(e.log) : e.net ? isNetProblem(e.net) : false)));
+    if (!rows.length) return `<div class="muted small" style="padding:10px">${logProblemsOnly ? 'No problems here.' : 'Nothing recorded.'}</div>`;
+    const shown = rows.slice(0, LOG_PANEL_ROWS).map((e) => {
+      if (e.log) {
+        const c = e.log;
+        const cls = isConsoleProblem(c) ? 'bad' : c.level === 'warn' ? 'warn' : '';
+        return `<div class="lg ${cls}" data-ts="${e.ts}" tabindex="0"><span class="t">${relOf(e.ts)}</span><span class="badge ${cls}">${c.source === 'console' ? esc(c.level) : c.source === 'exception' ? 'uncaught' : 'rejection'}</span><span class="m">${esc(consoleText(c))}${c.stack ? `<small>${esc(c.stack.split('\n').slice(0, 3).join('\n'))}</small>` : ''}</span></div>`;
+      }
+      const n = e.net!;
+      const cls = isNetProblem(n) ? 'bad' : '';
+      return `<div class="lg ${cls}" data-ts="${e.ts}" tabindex="0"><span class="t">${relOf(e.ts)}</span><span class="badge ${cls}">${esc(netStatus(n))}</span><span class="m">${n.method ? `<b>${esc(n.method)}</b> ` : ''}${esc(n.url)}<small>${esc(n.kind === 'resource' ? (n.initiator ?? 'resource') : n.kind)}${n.ms ? ` · ${n.ms} ms` : ''}${n.size ? ` · ${bytes(n.size)}` : ''}</small></span></div>`;
+    });
+    return shown.join('') + (rows.length > LOG_PANEL_ROWS ? `<div class="muted small" style="padding:10px">${rows.length - LOG_PANEL_ROWS} more rows are in the export.</div>` : '');
+  };
+  const logPanelHtml = (): string => {
+    const logs = logEvents();
+    if (!logs.length) return '';
+    const cons = logs.filter((e) => e.type === 'console');
+    const nets = logs.filter((e) => e.type === 'network');
+    const errs = cons.filter((e) => e.log && isConsoleProblem(e.log)).length;
+    const failed = nets.filter((e) => e.net && isNetProblem(e.net)).length;
+    return `<section class="card panelcard" id="devlog"><h2>${icon('square-terminal')}Console &amp; network<span class="sp small faint">filtered on this device · no bodies, headers or query values</span></h2>
+      <div class="lgbar"><div class="seg" role="tablist" aria-label="Log"><button role="tab" data-logtab="console" class="${logTab === 'console' ? 'on' : ''}" aria-selected="${logTab === 'console'}">Console ${cons.length}${errs ? ` <span class="badge bad">${errs}</span>` : ''}</button><button role="tab" data-logtab="network" class="${logTab === 'network' ? 'on' : ''}" aria-selected="${logTab === 'network'}">Network ${nets.length}${failed ? ` <span class="badge bad">${failed}</span>` : ''}</button></div>
+      <label class="hlclicks" style="margin-left:auto"><input type="checkbox" id="logprob" ${logProblemsOnly ? 'checked' : ''}> Problems only</label></div>
+      <div class="loglist" id="loglist" role="region" aria-label="${logTab === 'console' ? 'Console messages' : 'Requests'}">${logRowsHtml()}</div></section>`;
+  };
 
   // Steps: drafted from observed actions; the reporter can rename any of them (the timeline keeps what really happened).
   const stepsHtml = (steps: Step[]) =>
@@ -186,6 +223,7 @@ async function detail(id: string): Promise<void> {
           const text = esc(m.timeline[i]?.text ?? e.type);
           return `<div class="tl ${e.type} ${e.ts < s.startedAt ? 'pre' : ''}" data-i="${i}"><span class="t">${rel}</span><span class="ic">${icon(TL_ICON[e.type] ?? 'info')}</span><span class="tx">${text}</span></div>`;
         }).join('') || '<div class="muted small" style="padding:10px">No events.</div>'}</div></section>
+      ${logPanelHtml()}
       ${ev.shots.length ? `<section class="card panelcard"><h2>${icon('image')}Screenshots<span class="sp small faint">${ev.shots.length} · pencil = annotate / blur</span></h2><div class="gallery">${ev.shots.map((sh, i) => `<div class="shot"><a href="${shotUrls[i]}" data-shot="${i}"><img src="${shotUrls[i]}" alt="screenshot ${i + 1}"></a>${sh.annotations.length ? `<span class="flag badge ${hasRedaction(sh.annotations) ? 'warn' : 'live'}">${hasRedaction(sh.annotations) ? 'Redacted' : 'Annotated'}</span>` : ''}<div class="edit"><button class="iconbtn" data-edit="${i}" title="Annotate, blur or redact" aria-label="Annotate screenshot ${i + 1}">${icon('pencil')}</button></div><div class="cap"><span>${sh.markerOrdinal ? `Marker ${sh.markerOrdinal}` : `Shot ${i + 1}`}</span><span class="num">${formatClock(Math.max(0, sh.ts - s.startedAt))}</span></div></div>`).join('')}</div></section>` : ''}
     </div><div class="col">
       <section class="card panelcard"><h2>${icon('file-text')}Report</h2>
@@ -202,6 +240,7 @@ async function detail(id: string): Promise<void> {
         ${formats.length ? '' : `<p class="small" id="export-none" style="color:var(--red-ink)">${icon('triangle-alert')}Exporting is turned off by your organization.</p>`}
         <div class="formats">${formats.map((f) => `<label class="fmt"><input type="checkbox" data-fmt="${f.id}" ${f.on ? 'checked' : ''} aria-label="${f.name}">${icon(f.icon)}<b>${f.name}</b><span>${f.sub}</span><i class="tick">${icon('check')}</i></label>`).join('')}</div>
         ${policy.allowUnredactedOriginals && ev.shots.some((x) => x.annotations.length) ? `<div class="setrow" style="padding:12px 0 0;border:0"><div><div class="t">Include original screenshots</div><div class="s">Unredacted originals go into the ZIP only if you switch this on</div></div><label class="switch"><input type="checkbox" id="inc-orig"><span></span></label></div>` : ''}
+        ${logEvents().length ? `<div class="setrow" style="padding:12px 0 0;border:0"><div><div class="t">Console &amp; network log</div><div class="s">Errors in the report, the full log as console.json and network.har in the ZIP</div></div><label class="switch"><input type="checkbox" id="inc-logs" aria-label="Include the console and network log" ${includeLogs ? 'checked' : ''}><span></span></label></div>` : ''}
         <div class="field" style="margin:14px 0 0"><label for="fname">File name</label><input class="input" type="text" id="fname" value="Bug-{date}_{time}"><span class="hint" id="fprev"></span></div>
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">${formats.length ? `<button class="btn primary" id="export" style="flex:1">${icon('download')}Export selected</button>` : ''}${okFormats.includes('md') ? `<button class="btn" id="cpmd">${icon('copy')}Markdown</button>` : ''}${okFormats.includes('txt') ? `<button class="btn" id="cptxt">${icon('copy')}Text</button>` : ''}</div>
         <div class="exstatus" id="exstatus">${exportNote}</div></section>
@@ -426,6 +465,33 @@ async function detail(id: string): Promise<void> {
       }
     });
     wirePrivacy(vid);
+    const seekWall = (ts: number) => {
+      if (!vid || !video) return;
+      const ms = wallToVideoMs(video.clock, ts);
+      vid.currentTime = Math.max(0, (previewing ? afterCuts(ms, normalizeCuts(edits.cuts)) : ms) / 1000);
+    };
+    const devlog = document.getElementById('devlog');
+    devlog?.addEventListener('click', (e) => {
+      const tab = (e.target as HTMLElement).closest<HTMLElement>('[data-logtab]');
+      if (tab) {
+        logTab = tab.dataset.logtab as 'console' | 'network';
+        devlog.querySelectorAll<HTMLElement>('[data-logtab]').forEach((b) => { b.classList.toggle('on', b === tab); b.setAttribute('aria-selected', String(b === tab)); });
+        document.getElementById('loglist')!.setAttribute('aria-label', logTab === 'console' ? 'Console messages' : 'Requests');
+        document.getElementById('loglist')!.innerHTML = logRowsHtml();
+        return;
+      }
+      const row = (e.target as HTMLElement).closest<HTMLElement>('.lg[data-ts]');
+      if (row) seekWall(Number(row.dataset.ts));
+    });
+    devlog?.addEventListener('keydown', (e) => {
+      const row = (e.target as HTMLElement).closest<HTMLElement>('.lg[data-ts]');
+      if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); seekWall(Number(row.dataset.ts)); }
+    });
+    document.getElementById('logprob')?.addEventListener('change', (e) => {
+      logProblemsOnly = (e.target as HTMLInputElement).checked;
+      document.getElementById('loglist')!.innerHTML = logRowsHtml();
+    });
+    document.getElementById('inc-logs')?.addEventListener('change', (e) => (includeLogs = (e.target as HTMLInputElement).checked));
     document.getElementById('prekeep')?.addEventListener('change', async (e) => {
       readFields();
       keepPre = (e.target as HTMLInputElement).checked;
@@ -493,7 +559,7 @@ async function detail(id: string): Promise<void> {
     const rebuild = async (over?: Parameters<typeof model>[0]) => {
       readFields();
       await saveReport(ev.report);
-      return model(over);
+      return model({ ...over, excludeLogs: !includeLogs });
     };
     const copy = async (kind: 'md' | 'txt') => {
       if (!confirmExport()) return;

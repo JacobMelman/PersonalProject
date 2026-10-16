@@ -18,6 +18,7 @@ Intune, a configuration profile or a JSON file. Nothing is configured in the ext
 | `AfkAutoPauseMinutes` | 0 / 5 / 10 / 15 / 30 | Fixes AFK auto-pause (0 = off). | Locked. |
 | `MarkerScreenshots` | true / false | Fixes "screenshot with every marker". | Locked. |
 | `VideoCaptureAllowed` | true / false | `false` forbids video: ReproDesk then only offers **Screenshot-only** mode, whatever the user chose. `true` merely means "not forbidden". | Video switch locked off, "Forbidden: Screenshot-only mode". |
+| `ConsoleNetworkLog` | true / false | Fixes the **Console & network log** (console messages, uncaught errors and request metadata of the approved target, filtered on the device: no bodies, headers, cookies or query values; see `DEVTOOLS_CAPTURE_PLAN.md`). `true` = always recorded, `false` = never. Unset = the user decides; it is off by default. | Switch locked on or off, listed in the "Managed by your organization" banner. |
 | `EnvironmentLabel` | text | Environment name written into every report (e.g. "QA staging"). | Locked. |
 | `AllowedExportFormats` | subset of `zip`, `html`, `docx`, `xlsx`, `txt`, `md` | Only these formats are offered; the Markdown / Text copy buttons follow `md` / `txt`. A list that names no known format turns exporting **off**. | Other formats are missing; "Export options are set by your organization." |
 | `AllowUnredactedOriginals` | true / false | `false` removes the "include original screenshots" switch: unredacted originals can never leave the device. Redacted copies are unaffected. | Switch missing. |

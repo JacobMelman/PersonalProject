@@ -56,4 +56,9 @@ export type ContentMessage =
   | { t: 'hello'; origin: string; path: string; visible: boolean }
   | { t: 'ping' }
   | { t: 'bye' }
-  | { t: 'event'; ev: Omit<TimelineEvent, 'sessionId' | 'ts' | 'tabId'> & { ts?: number } };
+  | { t: 'event'; ev: Omit<TimelineEvent, 'sessionId' | 'ts' | 'tabId'> & { ts?: number } }
+  /** Console & network log entries from the page recorder, unfiltered: the service worker checks, filters and bounds them. */
+  | { t: 'logs'; origin: string; items: unknown[] };
+
+/** DOM event names between the page recorder (page world) and the content script (isolated world). */
+export const PAGELOG_EVENTS = { batch: '__reprodesk_log', pull: '__reprodesk_log_pull', ping: '__reprodesk_log_ping' } as const;

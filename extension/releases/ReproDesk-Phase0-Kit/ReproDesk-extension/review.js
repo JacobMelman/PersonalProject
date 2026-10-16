@@ -116,6 +116,51 @@ function formatClock(ms) {
   return `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
 }
 
+// src/shared/devlog.ts
+var REDACTION_RULES = "devlog-patterns-v1";
+var SECRET_KEY = String.raw`[\w.-]*?(?:password|passwd|passphrase|secret|token|api[_-]?key|apikey|authorization|session[_-]?id|sessid|cookie|credential|private[_-]?key|card[_-]?number|cardnumber|iban)[\w.-]*|auth|pin|otp|cvv|cvc|ssn|sid|pwd|pass`, KEY_VALUE = new RegExp(String.raw`(["']?)\b(${SECRET_KEY})\b\1(\s*[:=]\s*)("[^"]*"|'[^']*'|(?:Bearer|Basic|Token)\s+[^\s,;&}\])]+|[^\s,;&}\])]+)`, "gi");
+function isConsoleProblem(c) {
+  return c.level === "error" || c.source !== "console";
+}
+function isNetProblem(n3) {
+  return n3.status >= 400 || !!n3.error;
+}
+var SOURCE_LABEL = { console: "", exception: "Uncaught ", rejection: "Unhandled rejection: " };
+function consoleText(c) {
+  return `${SOURCE_LABEL[c.source]}${c.text}`;
+}
+function netStatus(n3) {
+  return n3.error ? n3.error : n3.status ? String(n3.status) : "\u2014";
+}
+function netText(n3) {
+  return `${n3.method ? n3.method + " " : ""}${n3.url} \u2192 ${netStatus(n3)}${n3.ms ? ` (${n3.ms} ms)` : ""}`;
+}
+function buildHar(entries, creatorVersion, pageTitle, startedAt) {
+  let sorted = [...entries].sort((a, b) => a.ts - b.ts);
+  return {
+    log: {
+      version: "1.2",
+      creator: { name: "ReproDesk", version: creatorVersion },
+      pages: [{ startedDateTime: new Date(startedAt).toISOString(), id: "page_1", title: pageTitle, pageTimings: {} }],
+      entries: sorted.map(({ ts, net }) => {
+        let query = net.url.includes("?") ? net.url.slice(net.url.indexOf("?") + 1).split("&").map((p) => ({ name: p.replace(/=…$/, ""), value: "\u2026" })) : [];
+        return {
+          pageref: "page_1",
+          startedDateTime: new Date(ts).toISOString(),
+          time: net.ms,
+          request: { method: net.method || "GET", url: net.url, httpVersion: "", cookies: [], headers: [], queryString: query, headersSize: -1, bodySize: -1 },
+          response: { status: net.status, statusText: net.error ?? "", httpVersion: "", cookies: [], headers: [], content: { size: net.size ?? -1, mimeType: "" }, redirectURL: "", headersSize: -1, bodySize: -1 },
+          cache: {},
+          timings: { send: 0, wait: net.ms, receive: 0 },
+          _resourceType: net.kind === "resource" ? net.initiator ?? "other" : net.kind,
+          ...net.error ? { _error: net.error } : {}
+        };
+      }),
+      comment: "Recorded by ReproDesk: request metadata only. Query values, headers, cookies and bodies are never collected."
+    }
+  };
+}
+
 // src/report/model.ts
 var STEP_TEXT_MAX = 300, cleanStepText = (t) => t.replace(/\s+/g, " ").trim().slice(0, STEP_TEXT_MAX), SESSION_TYPE = { instant: "Instant Replay", repro: "Repro Session", screenshot: "Screenshot-only" };
 function describeElement(el) {
@@ -123,8 +168,13 @@ function describeElement(el) {
   let role = el.role ?? el.tag, name = el.label ? ` "${el.label}"` : el.stableId ? ` [${el.stableId}]` : "";
   return `${role}${name}`;
 }
+var isLogEvent = (e) => e.type === "console" || e.type === "network", isLogProblem = (e) => e.type === "console" && !!e.log && isConsoleProblem(e.log) || e.type === "network" && !!e.net && isNetProblem(e.net), onTimeline = (e) => !isLogEvent(e) || isLogProblem(e);
 function eventText(e) {
   switch (e.type) {
+    case "console":
+      return e.log ? e.log.source === "console" ? `Console ${e.log.level}: ${e.log.text}` : consoleText(e.log) : "Console message";
+    case "network":
+      return e.net ? `Request failed: ${netText(e.net)}` : "Request";
     case "click":
       return `Click ${describeElement(e.element)}${e.path ? ` on ${e.path}` : ""}`;
     case "focus":
@@ -156,7 +206,7 @@ function draftSteps(events, from, names = {}) {
   });
 }
 function buildReportModel(inp) {
-  let { session, events, shots, report, keepPre } = inp, t0 = session.startedAt, rel = (ts) => ts < t0 ? `-${formatClock(t0 - ts)}` : formatClock(ts - t0), pre = session.preContext, visible = events.filter((e) => keepPre || e.ts >= t0).sort((a, b) => a.ts - b.ts), endNote = session.status === "target_ended" ? `Capture ended because the target became unavailable${session.endReason ? ` (${session.endReason})` : ""}.${session.classification ? ` Reviewer classification: ${session.classification}${session.classificationNote ? ` - ${session.classificationNote}` : ""}.` : ""}` : session.status === "recovered" ? `Recovered Session: recording ended unexpectedly; evidence is complete up to the last committed chunk${session.lastCommittedAt ? ` (${new Date(session.lastCommittedAt).toLocaleString()})` : ""}. ${session.endReason ?? ""}`.trim() : null;
+  let { session, events, shots, report, keepPre } = inp, t0 = session.startedAt, rel = (ts) => ts < t0 ? `-${formatClock(t0 - ts)}` : formatClock(ts - t0), pre = session.preContext, all = events.filter((e) => keepPre || e.ts >= t0).sort((a, b) => a.ts - b.ts), visible = all.filter((e) => inp.excludeLogs ? !isLogEvent(e) : onTimeline(e)), logs = inp.excludeLogs ? [] : all.filter(isLogEvent), endNote = session.status === "target_ended" ? `Capture ended because the target became unavailable${session.endReason ? ` (${session.endReason})` : ""}.${session.classification ? ` Reviewer classification: ${session.classification}${session.classificationNote ? ` - ${session.classificationNote}` : ""}.` : ""}` : session.status === "recovered" ? `Recovered Session: recording ended unexpectedly; evidence is complete up to the last committed chunk${session.lastCommittedAt ? ` (${new Date(session.lastCommittedAt).toLocaleString()})` : ""}. ${session.endReason ?? ""}`.trim() : null;
   return {
     title: report.title,
     environment: session.environment,
@@ -178,7 +228,12 @@ function buildReportModel(inp) {
     screenshots: shots.sort((a, b) => a.ts - b.ts).map((s, i2) => ({ id: s.id, ts: s.ts, rel: rel(s.ts), label: s.markerOrdinal ? `Marker ${s.markerOrdinal}` : `Screenshot ${i2 + 1}`, filename: `screenshots/${String(i2 + 1).padStart(2, "0")}_${s.id}.png`, width: s.width ?? 0, height: s.height ?? 0, data: s.data })),
     timeline: visible.map((e) => ({ rel: rel(e.ts), type: e.type, text: eventText(e) })),
     video: inp.videoInfo,
-    videoNote: session.videoFailure ?? null
+    videoNote: session.videoFailure ?? null,
+    devlog: logs.length ? {
+      console: logs.filter((e) => e.type === "console" && e.log).map((e) => ({ ts: e.ts, rel: rel(e.ts), ...e.log })),
+      network: logs.filter((e) => e.type === "network" && e.net).map((e) => ({ ts: e.ts, rel: rel(e.ts), ...e.net })),
+      problems: logs.filter(isLogProblem).map((e) => ({ ts: e.ts, rel: rel(e.ts), kind: e.type, text: eventText(e) }))
+    } : null
   };
 }
 var defaultTitle = (s) => {
@@ -3352,6 +3407,26 @@ function logo(size = 28) {
   <circle cx="32" cy="32" r="9.6" fill="url(#${id}b)"/></svg>`;
 }
 
+// src/report/render-text.ts
+var PROBLEMS_SHOWN = 50, devlogSummary = (d) => {
+  let errs = d.problems.filter((p) => p.kind === "console").length, failed = d.problems.filter((p) => p.kind === "network").length;
+  return `${d.console.length} console message${d.console.length === 1 ? "" : "s"} (${errs} error${errs === 1 ? "" : "s"}), ${d.network.length} request${d.network.length === 1 ? "" : "s"} (${failed} failed)`;
+}, dur = (m) => m.durationMs != null ? formatClock(m.durationMs) : "n/a";
+function renderTxt(m) {
+  let L = [], line = (k, v) => L.push(`${k.padEnd(14)}${v}`);
+  return L.push(m.title, "=".repeat(Math.min(m.title.length, 80)), ""), line("Type:", m.sessionType), line("Environment:", m.environment), line("Target:", m.target), line("Browser:", m.browser), line("Started:", new Date(m.startedAt).toLocaleString()), line("Duration:", dur(m)), m.severity && line("Severity:", m.severity), m.endNote && L.push("", `NOTE: ${m.endNote}`), L.push("", "Steps to reproduce (draft, generated from observed actions)", "-".repeat(60)), m.preSession.present && L.push(`(Pre-session Context ${m.preSession.kept ? "kept as separate context" : "removed"}; its events are not part of these steps.)`), m.steps.length || L.push("(no actions recorded)"), m.steps.forEach((s) => {
+    L.push(`${String(s.n).padStart(2)}. [${s.rel}] ${s.text}`), s.renamed && L.push(`    observed: ${s.observed}`);
+  }), L.push("", "Expected result", "-".repeat(60), m.expected || "(not provided)"), L.push("", "Actual result", "-".repeat(60), m.actual || "(not provided)"), m.notes && L.push("", "Notes", "-".repeat(60), m.notes), L.push("", "Important moments", "-".repeat(60)), m.moments.length || L.push("(none)"), m.moments.forEach((x3) => L.push(`[${x3.rel}] ${x3.system ? "(system) " : ""}${x3.label}${x3.note ? ` - ${x3.note}` : ""}`)), m.devlog && (L.push("", "Console errors and failed requests", "-".repeat(60), devlogSummary(m.devlog)), m.devlog.problems.length || L.push("(none)"), m.devlog.problems.slice(0, PROBLEMS_SHOWN).forEach((p) => L.push(`[${p.rel}] ${p.text}`)), m.devlog.problems.length > PROBLEMS_SHOWN && L.push(`(${m.devlog.problems.length - PROBLEMS_SHOWN} more in the Evidence Package)`), L.push("Full log: console.json and network.har in the Evidence Package (no request bodies, headers, cookies or query values).")), L.push("", "Attachments / evidence", "-".repeat(60)), m.video ? L.push(`Video: ${m.video.filename} (${m.video.codec}, ${m.video.width}x${m.video.height}, ${formatClock(m.video.durationMs)}) - see the Evidence Package`) : L.push(`Video: not available${m.videoNote ? ` (${m.videoNote})` : ""}`), m.screenshots.forEach((s) => L.push(`Screenshot: ${s.filename} [${s.rel}] ${s.label} - see the Evidence Package (TXT cannot embed images)`)), L.join(`
+`) + `
+`;
+}
+function renderMarkdown(m) {
+  let L = [`# ${m.title}`, ""];
+  return L.push(`- **Type:** ${m.sessionType}`, `- **Environment:** ${m.environment}`, `- **Target:** ${m.target}`, `- **Browser:** ${m.browser}`, `- **Started:** ${new Date(m.startedAt).toLocaleString()}`, `- **Duration:** ${dur(m)}`), m.severity && L.push(`- **Severity:** ${m.severity}`), m.endNote && L.push("", `> ${m.endNote}`), L.push("", "## Steps to reproduce", ""), m.steps.length || L.push("_No actions recorded._"), m.steps.forEach((s) => L.push(`${s.n}. \`${s.rel}\` ${s.text}${s.renamed ? ` (observed: ${s.observed})` : ""}`)), L.push("", "## Expected result", "", m.expected || "_not provided_", "", "## Actual result", "", m.actual || "_not provided_"), m.notes && L.push("", "## Notes", "", m.notes), m.moments.length && (L.push("", "## Important moments", ""), m.moments.forEach((x3) => L.push(`- \`${x3.rel}\` ${x3.system ? "_(system)_ " : ""}${x3.label}`))), m.devlog && (L.push("", "## Console errors and failed requests", "", `_${devlogSummary(m.devlog)}_`, ""), m.devlog.problems.length || L.push("_None._"), m.devlog.problems.slice(0, PROBLEMS_SHOWN).forEach((p) => L.push(`- \`${p.rel}\` ${p.text.replace(/([\\`*_[\]<>|])/g, "\\$1")}`)), m.devlog.problems.length > PROBLEMS_SHOWN && L.push(`- _${m.devlog.problems.length - PROBLEMS_SHOWN} more in the Evidence Package_`)), L.push("", "## Evidence", "", m.video ? `- Video: \`${m.video.filename}\`` : "- Video: not available"), m.screenshots.forEach((s) => L.push(`- Screenshot: \`${s.filename}\` (${s.label})`)), m.devlog && L.push("- Console & network log: `console.json`, `network.har`"), L.join(`
+`) + `
+`;
+}
+
 // src/report/render-html.ts
 var esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function b64(data) {
@@ -3389,9 +3464,19 @@ ol.steps li::before{content:counter(s);display:grid;place-items:center;width:24p
 figure{margin:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--card)}figure img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top}
 figcaption{display:flex;justify-content:space-between;padding:8px 12px;font-size:12.5px;color:var(--muted)}
 video{width:100%;border-radius:14px;background:#05070b;border:1px solid var(--line)}
+.probs{list-style:none;margin:0;padding:0;display:grid;gap:6px}.probs li{display:grid;grid-template-columns:54px 1fr;gap:10px;font-size:13.5px}.probs code,.log td.m{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+details.log{margin-top:12px}details.log summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:600}
+.log table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}.log td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:top}.log td.t{white-space:nowrap}
+.log tr.bad td{color:var(--red)}.log tr.warn td{color:var(--amber)}
 footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--faint);font-size:12.5px;display:flex;gap:10px;align-items:flex-start}
 @media (max-width:640px){.stats{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}
-@media print{body{background:#fff}.card,figure,.stat{break-inside:avoid;box-shadow:none}video{display:none}}`;
+@media print{body{background:#fff}.card,figure,.stat{break-inside:avoid;box-shadow:none}video{display:none}}`, LOG_ROWS = 1e3;
+function devlogHtml(m, assets) {
+  let d = m.devlog;
+  if (!d) return "";
+  let probs = d.problems.length ? `<ul class="probs">${d.problems.slice(0, PROBLEMS_SHOWN).map((p) => `<li><span class="t">${esc(p.rel)}</span><code>${esc(p.text)}</code></li>`).join("")}</ul>${d.problems.length > PROBLEMS_SHOWN ? `<p class="muted" style="font-size:12.5px;margin:8px 0 0">${d.problems.length - PROBLEMS_SHOWN} more below.</p>` : ""}` : '<span class="muted">No console errors or failed requests.</span>', more = (n3) => n3 > LOG_ROWS ? `<p class="muted" style="font-size:12.5px">${n3 - LOG_ROWS} more in the Evidence Package.</p>` : "", con = d.console.length ? `<details class="log"><summary>All console messages (${d.console.length})</summary><table>${d.console.slice(0, LOG_ROWS).map((c) => `<tr class="${isConsoleProblem(c) ? "bad" : c.level === "warn" ? "warn" : ""}"><td class="t">${esc(c.rel)}</td><td>${esc(c.level)}</td><td class="m">${esc(consoleText(c))}${c.stack ? `<br><span class="muted">${esc(c.stack).replace(/\n/g, "<br>")}</span>` : ""}</td></tr>`).join("")}</table>${more(d.console.length)}</details>` : "", net = d.network.length ? `<details class="log"><summary>All requests (${d.network.length})</summary><table>${d.network.slice(0, LOG_ROWS).map((n3) => `<tr class="${isNetProblem(n3) ? "bad" : ""}"><td class="t">${esc(n3.rel)}</td><td>${esc(n3.method || n3.initiator || n3.kind)}</td><td class="m">${esc(n3.url)}</td><td>${esc(netStatus(n3))}</td><td class="t">${n3.ms} ms</td></tr>`).join("")}</table>${more(d.network.length)}</details>` : "", files = assets === "zip" ? " Full log: <code>console.json</code> and <code>network.har</code> (opens in Chrome DevTools \u2192 Network \u2192 Import)." : "";
+  return `<h2>Console &amp; network</h2><div class="card"><p class="muted" style="margin:0 0 10px;font-size:13px">${esc(devlogSummary(d))}. Filtered on this device: no request bodies, headers, cookies or query values.${files}</p>${probs}${con}${net}</div>`;
+}
 function renderHtml(m, assets) {
   let shots = m.screenshots.map((s) => {
     let src = assets === "inline" && s.data ? `data:image/png;base64,${b64(s.data)}` : s.filename;
@@ -3410,27 +3495,11 @@ ${m.endNote ? `<div class="callout">${esc(m.endNote)}</div>` : ""}
 <h2>Result</h2><div class="two"><div class="card exp"><h3>Expected</h3><p>${m.expected ? esc(m.expected) : '<span class="muted">not provided</span>'}</p></div><div class="card act"><h3>Actual</h3><p>${m.actual ? esc(m.actual) : '<span class="muted">not provided</span>'}</p></div></div>
 ${m.notes ? `<h2>Notes</h2><div class="card"><pre>${esc(m.notes)}</pre></div>` : ""}
 <h2>Important moments</h2><div class="card">${m.moments.length ? `<ul class="moments">${m.moments.map((x3) => `<li class="${x3.system ? "sys" : ""}"><span class="t">${esc(x3.rel)}</span><span class="dot"></span><span>${esc(x3.label)}${x3.note ? ` <span class="muted">\xB7 ${esc(x3.note)}</span>` : ""}</span></li>`).join("")}</ul>` : '<span class="muted">None recorded.</span>'}</div>
+${devlogHtml(m, assets)}
 <h2>Replay</h2>${video}
 <h2>Screenshots</h2>${shots ? `<div class="gallery">${shots}</div>` : '<div class="card"><span class="muted">None.</span></div>'}
 <footer><span>\u26A0</span><span>Rendered pixels may contain sensitive values visible in the tested application. ReproDesk never collects keystrokes, clipboard contents or typed values, but the video shows what was on screen. Review before sharing.</span></footer>
 </div></body></html>`;
-}
-
-// src/report/render-text.ts
-var dur = (m) => m.durationMs != null ? formatClock(m.durationMs) : "n/a";
-function renderTxt(m) {
-  let L = [], line = (k, v) => L.push(`${k.padEnd(14)}${v}`);
-  return L.push(m.title, "=".repeat(Math.min(m.title.length, 80)), ""), line("Type:", m.sessionType), line("Environment:", m.environment), line("Target:", m.target), line("Browser:", m.browser), line("Started:", new Date(m.startedAt).toLocaleString()), line("Duration:", dur(m)), m.severity && line("Severity:", m.severity), m.endNote && L.push("", `NOTE: ${m.endNote}`), L.push("", "Steps to reproduce (draft, generated from observed actions)", "-".repeat(60)), m.preSession.present && L.push(`(Pre-session Context ${m.preSession.kept ? "kept as separate context" : "removed"}; its events are not part of these steps.)`), m.steps.length || L.push("(no actions recorded)"), m.steps.forEach((s) => {
-    L.push(`${String(s.n).padStart(2)}. [${s.rel}] ${s.text}`), s.renamed && L.push(`    observed: ${s.observed}`);
-  }), L.push("", "Expected result", "-".repeat(60), m.expected || "(not provided)"), L.push("", "Actual result", "-".repeat(60), m.actual || "(not provided)"), m.notes && L.push("", "Notes", "-".repeat(60), m.notes), L.push("", "Important moments", "-".repeat(60)), m.moments.length || L.push("(none)"), m.moments.forEach((x3) => L.push(`[${x3.rel}] ${x3.system ? "(system) " : ""}${x3.label}${x3.note ? ` - ${x3.note}` : ""}`)), L.push("", "Attachments / evidence", "-".repeat(60)), m.video ? L.push(`Video: ${m.video.filename} (${m.video.codec}, ${m.video.width}x${m.video.height}, ${formatClock(m.video.durationMs)}) - see the Evidence Package`) : L.push(`Video: not available${m.videoNote ? ` (${m.videoNote})` : ""}`), m.screenshots.forEach((s) => L.push(`Screenshot: ${s.filename} [${s.rel}] ${s.label} - see the Evidence Package (TXT cannot embed images)`)), L.join(`
-`) + `
-`;
-}
-function renderMarkdown(m) {
-  let L = [`# ${m.title}`, ""];
-  return L.push(`- **Type:** ${m.sessionType}`, `- **Environment:** ${m.environment}`, `- **Target:** ${m.target}`, `- **Browser:** ${m.browser}`, `- **Started:** ${new Date(m.startedAt).toLocaleString()}`, `- **Duration:** ${dur(m)}`), m.severity && L.push(`- **Severity:** ${m.severity}`), m.endNote && L.push("", `> ${m.endNote}`), L.push("", "## Steps to reproduce", ""), m.steps.length || L.push("_No actions recorded._"), m.steps.forEach((s) => L.push(`${s.n}. \`${s.rel}\` ${s.text}${s.renamed ? ` (observed: ${s.observed})` : ""}`)), L.push("", "## Expected result", "", m.expected || "_not provided_", "", "## Actual result", "", m.actual || "_not provided_"), m.notes && L.push("", "## Notes", "", m.notes), m.moments.length && (L.push("", "## Important moments", ""), m.moments.forEach((x3) => L.push(`- \`${x3.rel}\` ${x3.system ? "_(system)_ " : ""}${x3.label}`))), L.push("", "## Evidence", "", m.video ? `- Video: \`${m.video.filename}\`` : "- Video: not available"), m.screenshots.forEach((s) => L.push(`- Screenshot: \`${s.filename}\` (${s.label})`)), L.join(`
-`) + `
-`;
 }
 
 // node_modules/docx/dist/index.mjs
@@ -21065,6 +21134,12 @@ async function renderDocx(m) {
     ...m.notes ? [new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Notes")] }), para(m.notes)] : [],
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Important moments")] }),
     ...m.moments.length ? m.moments.map((x3) => para(`[${x3.rel}] ${x3.system ? "(system) " : ""}${x3.label}${x3.note ? ` - ${x3.note}` : ""}`)) : [para("None.", { italics: !0 })],
+    ...m.devlog ? [
+      new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Console errors and failed requests")] }),
+      para(devlogSummary(m.devlog), { italics: !0 }),
+      ...m.devlog.problems.length ? m.devlog.problems.slice(0, PROBLEMS_SHOWN).map((p) => para(`[${p.rel}] ${p.text}`)) : [para("None.", { italics: !0 })],
+      ...m.devlog.problems.length > PROBLEMS_SHOWN ? [para(`${m.devlog.problems.length - PROBLEMS_SHOWN} more in the Evidence Package.`, { italics: !0 })] : []
+    ] : [],
     new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Screenshots and evidence")] }),
     para(m.video ? `Replay video: ${m.video.filename} (see the Evidence Package)` : `Video not available${m.videoNote ? `: ${m.videoNote}` : ""}`)
   ];
@@ -21519,7 +21594,7 @@ function zipSync(data, opts) {
 }
 
 // src/report/render-xlsx.ts
-var x2 = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ""), col = (i2) => String.fromCharCode(65 + i2);
+var XLSX_LOG_ROWS = 5e3, x2 = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ""), col = (i2) => String.fromCharCode(65 + i2);
 function sheet(rows, widths) {
   let cols = widths.map((w, i2) => `<col min="${i2 + 1}" max="${i2 + 1}" width="${w}" customWidth="1"/>`).join(""), body = rows.map((r, ri) => `<row r="${ri + 1}">${r.map((c, ci) => `<c r="${col(ci)}${ri + 1}" t="inlineStr"${ri === 0 ? ' s="1"' : ""}><is><t xml:space="preserve">${x2(c)}</t></is></c>`).join("")}</row>`).join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols>${cols}</cols><sheetData>${body}</sheetData></worksheet>`;
@@ -21541,7 +21616,9 @@ function renderXlsx(m) {
     ["Outcome note", m.endNote ?? ""],
     ["Replay video", m.video ? m.video.filename : "not available"],
     ["Screenshots", m.screenshots.map((s) => s.filename).join("; ")]
-  ], steps = [["#", "Time", "Step", "Observed action (when renamed)"], ...m.steps.map((s) => [String(s.n), s.rel, s.text, s.renamed ? s.observed : ""])], timeline = [["Time", "Type", "Event"], ...m.timeline.map((t) => [t.rel, t.type, t.text])], sheets = [["Report", meta, [24, 90]], ["Steps", steps, [6, 10, 70, 60]], ["Timeline", timeline, [10, 12, 90]]], files = {
+  ], steps = [["#", "Time", "Step", "Observed action (when renamed)"], ...m.steps.map((s) => [String(s.n), s.rel, s.text, s.renamed ? s.observed : ""])], timeline = [["Time", "Type", "Event"], ...m.timeline.map((t) => [t.rel, t.type, t.text])], sheets = [["Report", meta, [24, 90]], ["Steps", steps, [6, 10, 70, 60]], ["Timeline", timeline, [10, 12, 90]]];
+  m.devlog && (sheets.push(["Console", [["Time", "Level", "Message", "Stack"], ...m.devlog.console.slice(0, XLSX_LOG_ROWS).map((c) => [c.rel, c.level, consoleText(c), c.stack ?? ""])], [10, 8, 90, 60]]), sheets.push(["Network", [["Time", "Method", "URL", "Status", "Duration (ms)", "Size (bytes)", "Type"], ...m.devlog.network.slice(0, XLSX_LOG_ROWS).map((n3) => [n3.rel, n3.method, n3.url, netStatus(n3), String(n3.ms), n3.size != null ? String(n3.size) : "", n3.kind === "resource" ? n3.initiator ?? "resource" : n3.kind])], [10, 8, 80, 8, 12, 12, 10]]));
+  let files = {
     "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_s, i2) => `<Override PartName="/xl/worksheets/sheet${i2 + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`),
     "_rels/.rels": strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
     "xl/workbook.xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s, i2) => `<sheet name="${s[0]}" sheetId="${i2 + 1}" r:id="rId${i2 + 1}"/>`).join("")}</sheets></workbook>`),
@@ -21560,8 +21637,8 @@ var MANIFEST_SCHEMA_VERSION = 1;
 async function buildEvidencePackage(inp) {
   let { model, session, events, shots, video } = inp, files = {};
   files["report.html"] = strToU8(renderHtml(model, "zip")), files["report.txt"] = strToU8(renderTxt(model)), files["report.md"] = strToU8(renderMarkdown(model)), inp.videoBytes && model.video && (files[model.video.filename] = inp.videoBytes), model.screenshots.forEach((s) => s.data && (files[s.filename] = s.data)), Object.assign(files, inp.extraFiles ?? {});
-  let visibleEvents = events.filter((e) => inp.keepPre || e.ts >= session.startedAt);
-  files["events.json"] = strToU8(
+  let visibleEvents = events.filter((e) => (inp.keepPre || e.ts >= session.startedAt) && e.type !== "console" && e.type !== "network"), dl = model.devlog;
+  dl && (files["console.json"] = strToU8(JSON.stringify(dl.console.map((c) => ({ ts_ms: c.ts - session.startedAt, ts: c.ts, level: c.level, source: c.source, text: c.text, stack: c.stack ?? null })), null, 2)), files["network.har"] = strToU8(JSON.stringify(buildHar(dl.network.map((n3) => ({ ts: n3.ts, net: n3 })), inp.version, model.title, session.startedAt), null, 2))), files["events.json"] = strToU8(
     JSON.stringify(visibleEvents.map((e) => ({ ts_ms: e.ts - session.startedAt, ts: e.ts, type: e.type, target: e.origin ? { kind: "web", origin: e.origin, path: e.path } : void 0, element: e.element, value: null, label: e.label, system: e.system, source: e.source, confidence: e.confidence })), null, 2)
   ), files["session.json"] = strToU8(JSON.stringify({ ...session, screenshots: shots.map(({ id, ts, origin, path, browser: browser2, viewport, captureMode, markerOrdinal, annotations }) => ({ id, ts, origin, path, browser: browser2, viewport, captureMode, markerOrdinal, annotations, redacted: hasRedaction(annotations) })) }, null, 2));
   let artifacts = [];
@@ -21581,6 +21658,13 @@ async function buildEvidencePackage(inp) {
     last_committed: session.lastCommittedAt ? new Date(session.lastCommittedAt).toISOString() : null,
     pre_session_context: session.preContext ? { present: !0, kept: inp.keepPre, seconds: Math.round((session.preContext.endWall - session.preContext.startWall) / 1e3) } : { present: !1 },
     video: video ? { codec: video.codec, width: video.width, height: video.height, start_wall_ms: video.startWall, duration_ms: video.durationMs, gaps: video.gaps, pauses_not_recorded: video.clock.pauses.map((p) => ({ from_wall_ms: p.fromWall, to_wall_ms: p.toWall, reason: p.reason ?? null, shown_at_ms: Math.round(p.atMs), shown_for_ms: p.holdMs })), redacted: inp.videoEdits ? { masks: inp.videoEdits.masks, cuts: inp.videoEdits.cuts } : !1, click_highlights: !!inp.clickHighlights } : null,
+    console_network_log: dl ? {
+      console_entries: dl.console.length,
+      requests: dl.network.length,
+      problems: dl.problems.length,
+      redaction_rules: REDACTION_RULES,
+      never_collected: ["request and response bodies", "headers", "cookies", "query values", "URL fragments", "storage"]
+    } : null,
     screenshots: shots.map((sh) => ({ id: sh.id, annotated: (sh.annotations?.length ?? 0) > 0, redacted: hasRedaction(sh.annotations), original_included: Object.keys(inp.extraFiles ?? {}).some((k) => k.startsWith("screenshots/originals/") && k.includes(sh.id)) })),
     notes: "sha256 values are integrity metadata only, not a claim of forensic chain-of-custody. Redacted screenshots are exported flattened; originals are included only when the exporter asked for them.",
     artifacts
@@ -23005,6 +23089,47 @@ var circle_check_default = `<!-- @license lucide-static v1.52.0 - ISC -->
 </svg>
 `;
 
+// node_modules/lucide-static/icons/square-terminal.svg
+var square_terminal_default = `<!-- @license lucide-static v1.52.0 - ISC -->
+<svg
+  class="lucide lucide-square-terminal"
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="m7 11 2-2-2-2" />
+  <path d="M11 13h4" />
+  <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+</svg>
+`;
+
+// node_modules/lucide-static/icons/arrow-left-right.svg
+var arrow_left_right_default = `<!-- @license lucide-static v1.52.0 - ISC -->
+<svg
+  class="lucide lucide-arrow-left-right"
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M8 3 4 7l4 4" />
+  <path d="M4 7h16" />
+  <path d="m16 21 4-4-4-4" />
+  <path d="M20 17H4" />
+</svg>
+`;
+
 // src/ui/icons.ts
 var raw = {
   "circle-dot": circle_dot_default,
@@ -23075,7 +23200,9 @@ var raw = {
   "lock-keyhole": lock_keyhole_default,
   "shield-alert": shield_alert_default,
   droplets: droplets_default,
-  "circle-check": circle_check_default
+  "circle-check": circle_check_default,
+  "square-terminal": square_terminal_default,
+  "arrow-left-right": arrow_left_right_default
 };
 function icon(name, cls = "") {
   return raw[name].replace(/<!--[\s\S]*?-->\s*/, "").replace(/\s+class="[^"]*"/, "").replace(/\s+width="24"\s+height="24"/, "").replace("<svg", `<svg class="i ${cls}" aria-hidden="true" focusable="false"`);
@@ -23234,6 +23361,7 @@ var DEFAULT_SETTINGS = {
   captureVideo: !0,
   openReviewAfterSave: !0,
   highlightClicks: !0,
+  captureLogs: !1,
   approvedOrigins: [],
   environment: "QA"
 };
@@ -23262,7 +23390,9 @@ function parsePolicy(raw2) {
   let afk = oneOf(r.AfkAutoPauseMinutes, [0, 5, 10, 15, 30]);
   afk !== void 0 && (settings.afkMinutes = afk);
   let marker = bool(r.MarkerScreenshots);
-  marker !== void 0 && (settings.markerScreenshot = marker), bool(r.VideoCaptureAllowed) === !1 && (settings.captureVideo = !1), typeof r.EnvironmentLabel == "string" && r.EnvironmentLabel.trim() && (settings.environment = r.EnvironmentLabel.trim().slice(0, 60));
+  marker !== void 0 && (settings.markerScreenshot = marker), bool(r.VideoCaptureAllowed) === !1 && (settings.captureVideo = !1);
+  let logs = bool(r.ConsoleNetworkLog);
+  logs !== void 0 && (settings.captureLogs = logs), typeof r.EnvironmentLabel == "string" && r.EnvironmentLabel.trim() && (settings.environment = r.EnvironmentLabel.trim().slice(0, 60));
   let allowed = strings(r.AllowedTargetOrigins), fmts = strings(r.AllowedExportFormats), days = typeof r.SessionRetentionDays == "number" && Number.isFinite(r.SessionRetentionDays) ? Math.min(3650, Math.max(0, Math.floor(r.SessionRetentionDays))) : 0, p = {
     managed: !1,
     allowedTargetOrigins: allowed && allowed.length ? allowed : null,
@@ -23307,7 +23437,7 @@ async function saveSettings(patch) {
 }
 
 // src/review/index.ts
-var app = document.getElementById("app"), VERSION2 = chrome.runtime.getManifest().version, sessionId = new URLSearchParams(location.search).get("session"), KIND_ICON = { instant: "history", repro: "video", screenshot: "camera" }, TL_ICON = { click: "mouse-pointer-click", navigate: "navigation", marker: "flag", screenshot: "camera", focus: "text-cursor-input", submit: "send", system: "info" }, FORMATS = [
+var app = document.getElementById("app"), VERSION2 = chrome.runtime.getManifest().version, sessionId = new URLSearchParams(location.search).get("session"), KIND_ICON = { instant: "history", repro: "video", screenshot: "camera" }, TL_ICON = { click: "mouse-pointer-click", navigate: "navigation", marker: "flag", screenshot: "camera", focus: "text-cursor-input", submit: "send", system: "info", console: "square-terminal", network: "arrow-left-right" }, LOG_PANEL_ROWS = 400, FORMATS = [
   { id: "zip", name: "Evidence ZIP", sub: "Video, shots, events, manifest", icon: "archive", on: !0 },
   { id: "html", name: "HTML", sub: "Self-contained report", icon: "file-code-2", on: !0 },
   { id: "docx", name: "Word", sub: "DOCX with screenshots", icon: "file-type-2" },
@@ -23331,7 +23461,7 @@ async function detail(id) {
   }
   let ev = loaded, policy = await getPolicy(), okFormats = allowedFormats(policy), formats = FORMATS.filter((f) => okFormats.includes(f.id)), confirmExport = () => !policy.requireExportConfirmation || confirm(`Your organization asks you to confirm before exporting.
 
-Video and screenshots can show sensitive values that were visible in the tested application. Have you checked the evidence and hidden what must not leave this device?`), keepPre = ev.session.preContext?.kept ?? !0, video = null, videoUrl = "", videoErr = "", exportNote = "", edits = sanitizeEdits(ev.session.videoEdits, 24 * 3600 * 1e3), previewing = !1, previewUrl = "", maskDraft = null, showClicks = (await getSettings()).highlightClicks !== !1, marks = () => video ? clickMarks(ev.events, video.clock, video.durationMs, { w: video.width, h: video.height }) : [], buildVideo = async () => {
+Video and screenshots can show sensitive values that were visible in the tested application. Have you checked the evidence and hidden what must not leave this device?`), keepPre = ev.session.preContext?.kept ?? !0, video = null, videoUrl = "", videoErr = "", exportNote = "", edits = sanitizeEdits(ev.session.videoEdits, 24 * 3600 * 1e3), previewing = !1, previewUrl = "", maskDraft = null, logTab = "console", logProblemsOnly = !1, includeLogs = !0, showClicks = (await getSettings()).highlightClicks !== !1, marks = () => video ? clickMarks(ev.events, video.clock, video.durationMs, { w: video.width, h: video.height }) : [], buildVideo = async () => {
     videoUrl && URL.revokeObjectURL(videoUrl), video = null, videoUrl = "";
     try {
       let pre = ev.session.preContext;
@@ -23347,11 +23477,32 @@ Video and screenshots can show sensitive values that were visible in the tested 
       shots: over?.shots ?? ev.shots,
       report: ev.report,
       keepPre,
+      excludeLogs: over?.excludeLogs,
       videoInfo: v ? { filename: "replay.webm", startWall: v.startWall, durationMs: v.durationMs, codec: v.codec, width: v.width, height: v.height } : null
     });
   };
   await buildVideo();
-  let shotUrls = ev.shots.map((s) => URL.createObjectURL(new Blob([s.data], { type: "image/png" }))), visibleEvents = () => ev.events.filter((e) => keepPre || e.ts >= ev.session.startedAt).sort((a, b) => a.ts - b.ts), stepsHtml = (steps) => steps.length ? `<ol class="steps">${steps.slice(0, 40).map((st) => `<li data-step="${esc2(st.key)}"><span class="stx">${esc2(st.text)}${st.renamed ? `<span class="obs" title="Observed action">${icon("mouse-pointer-click")}${esc2(st.observed)}</span>` : ""}</span><span class="rel">${st.rel}</span><span class="stbtns"><button class="iconbtn" data-rename aria-label="Rename step ${st.n}" title="Rename">${icon("pencil")}</button>${st.renamed ? `<button class="iconbtn" data-reset aria-label="Back to the observed action for step ${st.n}" title="Back to the observed action">${icon("rotate-ccw")}</button>` : ""}</span></li>`).join("")}</ol>` : '<p class="muted small">No actions were recorded.</p>', setStepText = async (key, text) => {
+  let shotUrls = ev.shots.map((s) => URL.createObjectURL(new Blob([s.data], { type: "image/png" }))), visibleEvents = () => ev.events.filter((e) => (keepPre || e.ts >= ev.session.startedAt) && onTimeline(e)).sort((a, b) => a.ts - b.ts), logEvents = () => ev.events.filter((e) => (keepPre || e.ts >= ev.session.startedAt) && isLogEvent(e)).sort((a, b) => a.ts - b.ts), relOf = (ts) => ts < ev.session.startedAt ? `-${formatClock(ev.session.startedAt - ts)}` : formatClock(ts - ev.session.startedAt), logRowsHtml = () => {
+    let rows = logEvents().filter((e) => e.type === logTab && (!logProblemsOnly || (e.log ? isConsoleProblem(e.log) : e.net ? isNetProblem(e.net) : !1)));
+    return rows.length ? rows.slice(0, LOG_PANEL_ROWS).map((e) => {
+      if (e.log) {
+        let c = e.log, cls2 = isConsoleProblem(c) ? "bad" : c.level === "warn" ? "warn" : "";
+        return `<div class="lg ${cls2}" data-ts="${e.ts}" tabindex="0"><span class="t">${relOf(e.ts)}</span><span class="badge ${cls2}">${c.source === "console" ? esc2(c.level) : c.source === "exception" ? "uncaught" : "rejection"}</span><span class="m">${esc2(consoleText(c))}${c.stack ? `<small>${esc2(c.stack.split(`
+`).slice(0, 3).join(`
+`))}</small>` : ""}</span></div>`;
+      }
+      let n3 = e.net, cls = isNetProblem(n3) ? "bad" : "";
+      return `<div class="lg ${cls}" data-ts="${e.ts}" tabindex="0"><span class="t">${relOf(e.ts)}</span><span class="badge ${cls}">${esc2(netStatus(n3))}</span><span class="m">${n3.method ? `<b>${esc2(n3.method)}</b> ` : ""}${esc2(n3.url)}<small>${esc2(n3.kind === "resource" ? n3.initiator ?? "resource" : n3.kind)}${n3.ms ? ` \xB7 ${n3.ms} ms` : ""}${n3.size ? ` \xB7 ${bytes(n3.size)}` : ""}</small></span></div>`;
+    }).join("") + (rows.length > LOG_PANEL_ROWS ? `<div class="muted small" style="padding:10px">${rows.length - LOG_PANEL_ROWS} more rows are in the export.</div>` : "") : `<div class="muted small" style="padding:10px">${logProblemsOnly ? "No problems here." : "Nothing recorded."}</div>`;
+  }, logPanelHtml = () => {
+    let logs = logEvents();
+    if (!logs.length) return "";
+    let cons = logs.filter((e) => e.type === "console"), nets = logs.filter((e) => e.type === "network"), errs = cons.filter((e) => e.log && isConsoleProblem(e.log)).length, failed = nets.filter((e) => e.net && isNetProblem(e.net)).length;
+    return `<section class="card panelcard" id="devlog"><h2>${icon("square-terminal")}Console &amp; network<span class="sp small faint">filtered on this device \xB7 no bodies, headers or query values</span></h2>
+      <div class="lgbar"><div class="seg" role="tablist" aria-label="Log"><button role="tab" data-logtab="console" class="${logTab === "console" ? "on" : ""}" aria-selected="${logTab === "console"}">Console ${cons.length}${errs ? ` <span class="badge bad">${errs}</span>` : ""}</button><button role="tab" data-logtab="network" class="${logTab === "network" ? "on" : ""}" aria-selected="${logTab === "network"}">Network ${nets.length}${failed ? ` <span class="badge bad">${failed}</span>` : ""}</button></div>
+      <label class="hlclicks" style="margin-left:auto"><input type="checkbox" id="logprob" ${logProblemsOnly ? "checked" : ""}> Problems only</label></div>
+      <div class="loglist" id="loglist" role="region" aria-label="${logTab === "console" ? "Console messages" : "Requests"}">${logRowsHtml()}</div></section>`;
+  }, stepsHtml = (steps) => steps.length ? `<ol class="steps">${steps.slice(0, 40).map((st) => `<li data-step="${esc2(st.key)}"><span class="stx">${esc2(st.text)}${st.renamed ? `<span class="obs" title="Observed action">${icon("mouse-pointer-click")}${esc2(st.observed)}</span>` : ""}</span><span class="rel">${st.rel}</span><span class="stbtns"><button class="iconbtn" data-rename aria-label="Rename step ${st.n}" title="Rename">${icon("pencil")}</button>${st.renamed ? `<button class="iconbtn" data-reset aria-label="Back to the observed action for step ${st.n}" title="Back to the observed action">${icon("rotate-ccw")}</button>` : ""}</span></li>`).join("")}</ol>` : '<p class="muted small">No actions were recorded.</p>', setStepText = async (key, text) => {
     let names = { ...ev.report.stepTexts ?? {} }, step = model().steps.find((s) => s.key === key), clean = cleanStepText(text);
     !clean || clean === step?.observed ? delete names[key] : names[key] = clean, ev.report = { ...ev.report, stepTexts: names }, await saveReport(ev.report), document.getElementById("steps").innerHTML = stepsHtml(model().steps);
   }, wireSteps = () => {
@@ -23405,6 +23556,7 @@ Video and screenshots can show sensitive values that were visible in the tested 
       let rel = e.ts < s.startedAt ? `-${formatClock(s.startedAt - e.ts)}` : formatClock(e.ts - s.startedAt), text = esc2(m.timeline[i2]?.text ?? e.type);
       return `<div class="tl ${e.type} ${e.ts < s.startedAt ? "pre" : ""}" data-i="${i2}"><span class="t">${rel}</span><span class="ic">${icon(TL_ICON[e.type] ?? "info")}</span><span class="tx">${text}</span></div>`;
     }).join("") || '<div class="muted small" style="padding:10px">No events.</div>'}</div></section>
+      ${logPanelHtml()}
       ${ev.shots.length ? `<section class="card panelcard"><h2>${icon("image")}Screenshots<span class="sp small faint">${ev.shots.length} \xB7 pencil = annotate / blur</span></h2><div class="gallery">${ev.shots.map((sh, i2) => `<div class="shot"><a href="${shotUrls[i2]}" data-shot="${i2}"><img src="${shotUrls[i2]}" alt="screenshot ${i2 + 1}"></a>${sh.annotations.length ? `<span class="flag badge ${hasRedaction(sh.annotations) ? "warn" : "live"}">${hasRedaction(sh.annotations) ? "Redacted" : "Annotated"}</span>` : ""}<div class="edit"><button class="iconbtn" data-edit="${i2}" title="Annotate, blur or redact" aria-label="Annotate screenshot ${i2 + 1}">${icon("pencil")}</button></div><div class="cap"><span>${sh.markerOrdinal ? `Marker ${sh.markerOrdinal}` : `Shot ${i2 + 1}`}</span><span class="num">${formatClock(Math.max(0, sh.ts - s.startedAt))}</span></div></div>`).join("")}</div></section>` : ""}
     </div><div class="col">
       <section class="card panelcard"><h2>${icon("file-text")}Report</h2>
@@ -23421,6 +23573,7 @@ Video and screenshots can show sensitive values that were visible in the tested 
         ${formats.length ? "" : `<p class="small" id="export-none" style="color:var(--red-ink)">${icon("triangle-alert")}Exporting is turned off by your organization.</p>`}
         <div class="formats">${formats.map((f) => `<label class="fmt"><input type="checkbox" data-fmt="${f.id}" ${f.on ? "checked" : ""} aria-label="${f.name}">${icon(f.icon)}<b>${f.name}</b><span>${f.sub}</span><i class="tick">${icon("check")}</i></label>`).join("")}</div>
         ${policy.allowUnredactedOriginals && ev.shots.some((x3) => x3.annotations.length) ? '<div class="setrow" style="padding:12px 0 0;border:0"><div><div class="t">Include original screenshots</div><div class="s">Unredacted originals go into the ZIP only if you switch this on</div></div><label class="switch"><input type="checkbox" id="inc-orig"><span></span></label></div>' : ""}
+        ${logEvents().length ? `<div class="setrow" style="padding:12px 0 0;border:0"><div><div class="t">Console &amp; network log</div><div class="s">Errors in the report, the full log as console.json and network.har in the ZIP</div></div><label class="switch"><input type="checkbox" id="inc-logs" aria-label="Include the console and network log" ${includeLogs ? "checked" : ""}><span></span></label></div>` : ""}
         <div class="field" style="margin:14px 0 0"><label for="fname">File name</label><input class="input" type="text" id="fname" value="Bug-{date}_{time}"><span class="hint" id="fprev"></span></div>
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">${formats.length ? `<button class="btn primary" id="export" style="flex:1">${icon("download")}Export selected</button>` : ""}${okFormats.includes("md") ? `<button class="btn" id="cpmd">${icon("copy")}Markdown</button>` : ""}${okFormats.includes("txt") ? `<button class="btn" id="cptxt">${icon("copy")}Text</button>` : ""}</div>
         <div class="exstatus" id="exstatus">${exportNote}</div></section>
@@ -23565,7 +23718,28 @@ Video and screenshots can show sensitive values that were visible in the tested 
       lastIdx = idx, tl?.querySelectorAll(".tl.now").forEach((n3) => n3.classList.remove("now"));
       let row = tl?.querySelector(`[data-i="${idx}"]`);
       row && tl && (row.classList.add("now"), tl.scrollTop = row.offsetTop - tl.clientHeight / 2 + row.clientHeight / 2);
-    }), wirePrivacy(vid), document.getElementById("prekeep")?.addEventListener("change", async (e) => {
+    }), wirePrivacy(vid);
+    let seekWall = (ts) => {
+      if (!vid || !video) return;
+      let ms = wallToVideoMs(video.clock, ts);
+      vid.currentTime = Math.max(0, (previewing ? afterCuts(ms, normalizeCuts(edits.cuts)) : ms) / 1e3);
+    }, devlog = document.getElementById("devlog");
+    devlog?.addEventListener("click", (e) => {
+      let tab = e.target.closest("[data-logtab]");
+      if (tab) {
+        logTab = tab.dataset.logtab, devlog.querySelectorAll("[data-logtab]").forEach((b) => {
+          b.classList.toggle("on", b === tab), b.setAttribute("aria-selected", String(b === tab));
+        }), document.getElementById("loglist").setAttribute("aria-label", logTab === "console" ? "Console messages" : "Requests"), document.getElementById("loglist").innerHTML = logRowsHtml();
+        return;
+      }
+      let row = e.target.closest(".lg[data-ts]");
+      row && seekWall(Number(row.dataset.ts));
+    }), devlog?.addEventListener("keydown", (e) => {
+      let row = e.target.closest(".lg[data-ts]");
+      row && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), seekWall(Number(row.dataset.ts)));
+    }), document.getElementById("logprob")?.addEventListener("change", (e) => {
+      logProblemsOnly = e.target.checked, document.getElementById("loglist").innerHTML = logRowsHtml();
+    }), document.getElementById("inc-logs")?.addEventListener("change", (e) => includeLogs = e.target.checked), document.getElementById("prekeep")?.addEventListener("change", async (e) => {
       readFields(), keepPre = e.target.checked, ev.session.preContext && (ev.session = { ...ev.session, preContext: { ...ev.session.preContext, kept: keepPre } }, await dbPut("sessions", ev.session)), await buildVideo(), draw();
     }), ["cls", "clsnote"].forEach((cid) => document.getElementById(cid)?.addEventListener("change", async () => {
       ev.session = { ...ev.session, classification: document.getElementById("cls").value, classificationNote: document.getElementById("clsnote").value }, await dbPut("sessions", ev.session), draw();
@@ -23598,7 +23772,7 @@ Video and screenshots can show sensitive values that were visible in the tested 
       return sanitizeFilename(expandTemplate(fname.value, { date, time, title: ev.report.title, app: ev.session.targetOrigin?.replace(/^https?:\/\//, "") ?? "", env: ev.session.environment, type: m.sessionType }));
     }, preview = () => document.getElementById("fprev").textContent = `Files: ${baseName()}.<ext>`;
     fname.addEventListener("input", preview), preview();
-    let rebuild = async (over) => (readFields(), await saveReport(ev.report), model(over)), copy = async (kind) => {
+    let rebuild = async (over) => (readFields(), await saveReport(ev.report), model({ ...over, excludeLogs: !includeLogs })), copy = async (kind) => {
       if (!confirmExport()) return;
       let mm = await rebuild();
       await navigator.clipboard.writeText(kind === "md" ? renderMarkdown(mm) : renderTxt(mm)), setStatus([`<div class="r okr">${icon("check")}Copied as ${kind === "md" ? "Markdown" : "plain text"}</div>`]);

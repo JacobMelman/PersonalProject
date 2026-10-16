@@ -75,6 +75,16 @@ export async function dbAdd<T>(store: StoreName, value: T): Promise<IDBValidKey>
   return key;
 }
 
+/** Adds several records in one transaction (auto-increment keys). */
+export async function dbAddMany<T>(store: StoreName, values: T[]): Promise<void> {
+  if (!values.length) return;
+  const db = await openDb();
+  const tx = db.transaction(store, 'readwrite');
+  const os = tx.objectStore(store);
+  for (const v of values) os.add(v);
+  await done(tx);
+}
+
 export async function dbGet<T>(store: StoreName, key: IDBValidKey): Promise<T | undefined> {
   const db = await openDb();
   return wrap(db.transaction(store).objectStore(store).get(key)) as Promise<T | undefined>;

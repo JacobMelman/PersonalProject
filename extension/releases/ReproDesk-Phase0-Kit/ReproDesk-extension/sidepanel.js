@@ -10,6 +10,7 @@ var DEFAULT_SETTINGS = {
   captureVideo: !0,
   openReviewAfterSave: !0,
   highlightClicks: !0,
+  captureLogs: !1,
   approvedOrigins: [],
   environment: "QA"
 };
@@ -38,7 +39,9 @@ function parsePolicy(raw2) {
   let afk = oneOf(r.AfkAutoPauseMinutes, [0, 5, 10, 15, 30]);
   afk !== void 0 && (settings2.afkMinutes = afk);
   let marker = bool(r.MarkerScreenshots);
-  marker !== void 0 && (settings2.markerScreenshot = marker), bool(r.VideoCaptureAllowed) === !1 && (settings2.captureVideo = !1), typeof r.EnvironmentLabel == "string" && r.EnvironmentLabel.trim() && (settings2.environment = r.EnvironmentLabel.trim().slice(0, 60));
+  marker !== void 0 && (settings2.markerScreenshot = marker), bool(r.VideoCaptureAllowed) === !1 && (settings2.captureVideo = !1);
+  let logs = bool(r.ConsoleNetworkLog);
+  logs !== void 0 && (settings2.captureLogs = logs), typeof r.EnvironmentLabel == "string" && r.EnvironmentLabel.trim() && (settings2.environment = r.EnvironmentLabel.trim().slice(0, 60));
   let allowed = strings(r.AllowedTargetOrigins), fmts = strings(r.AllowedExportFormats), days = typeof r.SessionRetentionDays == "number" && Number.isFinite(r.SessionRetentionDays) ? Math.min(3650, Math.max(0, Math.floor(r.SessionRetentionDays))) : 0, p = {
     managed: !1,
     allowedTargetOrigins: allowed && allowed.length ? allowed : null,
@@ -1699,6 +1702,47 @@ var circle_check_default = `<!-- @license lucide-static v1.52.0 - ISC -->
 </svg>
 `;
 
+// node_modules/lucide-static/icons/square-terminal.svg
+var square_terminal_default = `<!-- @license lucide-static v1.52.0 - ISC -->
+<svg
+  class="lucide lucide-square-terminal"
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="m7 11 2-2-2-2" />
+  <path d="M11 13h4" />
+  <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+</svg>
+`;
+
+// node_modules/lucide-static/icons/arrow-left-right.svg
+var arrow_left_right_default = `<!-- @license lucide-static v1.52.0 - ISC -->
+<svg
+  class="lucide lucide-arrow-left-right"
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <path d="M8 3 4 7l4 4" />
+  <path d="M4 7h16" />
+  <path d="m16 21 4-4-4-4" />
+  <path d="M20 17H4" />
+</svg>
+`;
+
 // src/ui/icons.ts
 var raw = {
   "circle-dot": circle_dot_default,
@@ -1769,7 +1813,9 @@ var raw = {
   "lock-keyhole": lock_keyhole_default,
   "shield-alert": shield_alert_default,
   droplets: droplets_default,
-  "circle-check": circle_check_default
+  "circle-check": circle_check_default,
+  "square-terminal": square_terminal_default,
+  "arrow-left-right": arrow_left_right_default
 };
 function icon(name, cls = "") {
   return raw[name].replace(/<!--[\s\S]*?-->\s*/, "").replace(/\s+class="[^"]*"/, "").replace(/\s+width="24"\s+height="24"/, "").replace("<svg", `<svg class="i ${cls}" aria-hidden="true" focusable="false"`);
@@ -1863,7 +1909,7 @@ function seg(key, values) {
 var sw = (key, name) => `<label class="switch"><input type="checkbox" aria-label="${name}" data-sb="${key}" ${settings[key] ? "checked" : ""} ${isLocked(key) ? "disabled" : ""}><span></span></label>`, row = (t, s, ctl) => `<div class="setrow"><div><div class="t">${t}</div><div class="s">${s}</div></div>${ctl}</div>`;
 function managedRules() {
   let out = [];
-  return policy.allowedTargetOrigins && out.push(`ReproDesk can be armed only on: ${policy.allowedTargetOrigins.join(", ")}`), policy.blockedOrigins.length && out.push(`Never on: ${policy.blockedOrigins.join(", ")}`), policy.settings.captureVideo === !1 && out.push("Video capture is not allowed (Screenshot-only mode)"), policy.allowedExportFormats && out.push(`Exports limited to: ${policy.allowedExportFormats.map((f) => f.toUpperCase()).join(", ") || "none"}`), policy.allowUnredactedOriginals || out.push("Unredacted original screenshots cannot be exported"), policy.requireExportConfirmation && out.push("Every export asks for confirmation"), policy.sessionRetentionDays && out.push(`Finished sessions are deleted after ${policy.sessionRetentionDays} days`), out;
+  return policy.allowedTargetOrigins && out.push(`ReproDesk can be armed only on: ${policy.allowedTargetOrigins.join(", ")}`), policy.blockedOrigins.length && out.push(`Never on: ${policy.blockedOrigins.join(", ")}`), policy.settings.captureVideo === !1 && out.push("Video capture is not allowed (Screenshot-only mode)"), policy.settings.captureLogs === !0 && out.push("The console & network log is always recorded (filtered, no bodies or headers)"), policy.settings.captureLogs === !1 && out.push("The console & network log is turned off"), policy.allowedExportFormats && out.push(`Exports limited to: ${policy.allowedExportFormats.map((f) => f.toUpperCase()).join(", ") || "none"}`), policy.allowUnredactedOriginals || out.push("Unredacted original screenshots cannot be exported"), policy.requireExportConfirmation && out.push("Every export asks for confirmation"), policy.sessionRetentionDays && out.push(`Finished sessions are deleted after ${policy.sessionRetentionDays} days`), out;
 }
 function managedBanner() {
   if (!policy.managed) return "";
@@ -1879,6 +1925,7 @@ function settingsView() {
     ${row("AFK suspend", "After this idle time (locked = immediately)" + lk("afkMinutes"), seg("afkMinutes", [[0, "Off"], [5, "5m"], [10, "10m"], [15, "15m"], [30, "30m"]]))}
     ${row("Marker screenshots", "Capture a screenshot with every marker" + lk("markerScreenshot"), sw("markerScreenshot", "Marker screenshots"))}
     ${row("Video capture", (policy.settings.captureVideo === !1 ? "Forbidden: Screenshot-only mode" : "Off = Screenshot-only (applies when arming)") + lk("captureVideo"), sw("captureVideo", "Video capture"))}
+    ${row("Console &amp; network log", (policy.settings.captureLogs === !0 ? "Always recorded: console errors and request metadata, filtered" : "Console messages and requests of the target, filtered on this device (no bodies, headers or query values)") + lk("captureLogs"), sw("captureLogs", "Console and network log"))}
     ${row("Open report after saving", "Jump straight to Review", sw("openReviewAfterSave", "Open report after saving"))}</div></div>
     <div class="section"><h2>Target profile</h2><div class="card drawer">
     <div class="field" style="margin-top:10px"><label>Environment</label><input class="input" type="text" aria-label="Environment" data-s="environment" value="${esc(settings.environment)}" ${isLocked("environment") ? "disabled" : ""}>${isLocked("environment") ? `<span class="hint">${icon("lock")}set by your organization</span>` : ""}</div>

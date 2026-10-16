@@ -5,7 +5,7 @@ import type { Settings } from './types';
 export type ExportFormat = 'zip' | 'html' | 'docx' | 'xlsx' | 'txt' | 'md';
 export const EXPORT_FORMATS: ExportFormat[] = ['zip', 'html', 'docx', 'xlsx', 'txt', 'md'];
 
-type LockableKey = 'replaySec' | 'tailSec' | 'preSessionSec' | 'afkMinutes' | 'markerScreenshot' | 'captureVideo' | 'environment';
+type LockableKey = 'replaySec' | 'tailSec' | 'preSessionSec' | 'afkMinutes' | 'markerScreenshot' | 'captureVideo' | 'captureLogs' | 'environment';
 
 export interface Policy {
   /** True when at least one policy value is present (shown to the user as "managed by your organization"). */
@@ -56,6 +56,8 @@ export function parsePolicy(raw: unknown): Policy {
   if (marker !== undefined) settings.markerScreenshot = marker;
   const video = bool(r.VideoCaptureAllowed);
   if (video === false) settings.captureVideo = false; // true only means "not forbidden": the user's own choice stays
+  const logs = bool(r.ConsoleNetworkLog);
+  if (logs !== undefined) settings.captureLogs = logs; // true = always recorded, false = never: either way the user cannot change it
   if (typeof r.EnvironmentLabel === 'string' && r.EnvironmentLabel.trim()) settings.environment = r.EnvironmentLabel.trim().slice(0, 60);
 
   const allowed = strings(r.AllowedTargetOrigins);
@@ -147,7 +149,7 @@ export function validateRawPolicy(raw: unknown): string[] {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return ['policy must be a JSON object'];
   const r = raw as Record<string, unknown>;
   const known = ['AllowedTargetOrigins', 'BlockedOrigins', 'ApprovedOrigins', 'ReplayWindowSec', 'PostTriggerTailSec', 'PreSessionContextSec', 'AfkAutoPauseMinutes', 'MarkerScreenshots',
-    'VideoCaptureAllowed', 'EnvironmentLabel', 'AllowedExportFormats', 'AllowUnredactedOriginals', 'RequireExportConfirmation', 'SessionRetentionDays', 'SampleSessionsEnabled'];
+    'VideoCaptureAllowed', 'ConsoleNetworkLog', 'EnvironmentLabel', 'AllowedExportFormats', 'AllowUnredactedOriginals', 'RequireExportConfirmation', 'SessionRetentionDays', 'SampleSessionsEnabled'];
   for (const k of Object.keys(r)) if (!known.includes(k)) errs.push(`unknown policy "${k}"`);
   const list = (k: string, check: (s: string) => string | null) => {
     if (r[k] === undefined) return;
@@ -172,7 +174,7 @@ export function validateRawPolicy(raw: unknown): string[] {
   num('PreSessionContextSec', [0, 30]);
   num('AfkAutoPauseMinutes', [0, 5, 10, 15, 30]);
   num('SessionRetentionDays', undefined, 0, 3650);
-  for (const k of ['MarkerScreenshots', 'VideoCaptureAllowed', 'AllowUnredactedOriginals', 'RequireExportConfirmation', 'SampleSessionsEnabled']) {
+  for (const k of ['MarkerScreenshots', 'VideoCaptureAllowed', 'ConsoleNetworkLog', 'AllowUnredactedOriginals', 'RequireExportConfirmation', 'SampleSessionsEnabled']) {
     if (r[k] !== undefined && typeof r[k] !== 'boolean') errs.push(`${k} must be true or false`);
   }
   if (r.EnvironmentLabel !== undefined && typeof r.EnvironmentLabel !== 'string') errs.push('EnvironmentLabel must be a string');
