@@ -130,7 +130,16 @@ async function detail(id: string): Promise<void> {
   };
   const logPanelHtml = (): string => {
     const logs = logEvents();
-    if (!logs.length) return '';
+    // An empty log always says why, so "where is the console?" never goes unanswered.
+    if (!logs.length) {
+      const why =
+        policy.settings.captureLogs === false
+          ? 'Your organization has turned the console &amp; network log off.'
+          : ev.session.settingsSnapshot.captureLogs
+            ? 'The log was on, but the page logged nothing and made no requests while ReproDesk was capturing. What happened before you clicked the ReproDesk icon is not included: reload the page after arming to capture its load.'
+            : 'The console &amp; network log was off for this recording. Turn it on in the side panel (Settings → Console &amp; network log); it records what happens from then on.';
+      return `<section class="card panelcard" id="devlog"><h2>${icon('square-terminal')}Console &amp; network</h2><p class="small muted" id="devlog-empty" style="margin:0">${why}</p></section>`;
+    }
     const cons = logs.filter((e) => e.type === 'console');
     const nets = logs.filter((e) => e.type === 'network');
     const errs = cons.filter((e) => e.log && isConsoleProblem(e.log)).length;

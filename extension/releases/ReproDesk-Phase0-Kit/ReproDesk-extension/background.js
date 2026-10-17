@@ -538,7 +538,7 @@ async function createSession(kind, state, startedAt, settings) {
     targetOrigin: state.targetOrigin,
     environment: settings.environment,
     browser: browserName(),
-    settingsSnapshot: { replaySec: settings.replaySec, tailSec: settings.tailSec, preSessionSec: settings.preSessionSec, fps: settings.fps, bitrateKbps: settings.bitrateKbps },
+    settingsSnapshot: { replaySec: settings.replaySec, tailSec: settings.tailSec, preSessionSec: settings.preSessionSec, fps: settings.fps, bitrateKbps: settings.bitrateKbps, captureLogs: settings.captureLogs },
     preContext: null
   };
   return await dbPut("sessions", rec), await dbPut("journal", { key: "current", sessionId: rec.id, kind, startedAt, updatedAt: Date.now() }), rec;

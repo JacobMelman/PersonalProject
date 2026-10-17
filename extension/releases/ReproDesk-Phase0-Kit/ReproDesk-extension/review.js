@@ -23496,7 +23496,10 @@ Video and screenshots can show sensitive values that were visible in the tested 
     }).join("") + (rows.length > LOG_PANEL_ROWS ? `<div class="muted small" style="padding:10px">${rows.length - LOG_PANEL_ROWS} more rows are in the export.</div>` : "") : `<div class="muted small" style="padding:10px">${logProblemsOnly ? "No problems here." : "Nothing recorded."}</div>`;
   }, logPanelHtml = () => {
     let logs = logEvents();
-    if (!logs.length) return "";
+    if (!logs.length) {
+      let why = policy.settings.captureLogs === !1 ? "Your organization has turned the console &amp; network log off." : ev.session.settingsSnapshot.captureLogs ? "The log was on, but the page logged nothing and made no requests while ReproDesk was capturing. What happened before you clicked the ReproDesk icon is not included: reload the page after arming to capture its load." : "The console &amp; network log was off for this recording. Turn it on in the side panel (Settings \u2192 Console &amp; network log); it records what happens from then on.";
+      return `<section class="card panelcard" id="devlog"><h2>${icon("square-terminal")}Console &amp; network</h2><p class="small muted" id="devlog-empty" style="margin:0">${why}</p></section>`;
+    }
     let cons = logs.filter((e) => e.type === "console"), nets = logs.filter((e) => e.type === "network"), errs = cons.filter((e) => e.log && isConsoleProblem(e.log)).length, failed = nets.filter((e) => e.net && isNetProblem(e.net)).length;
     return `<section class="card panelcard" id="devlog"><h2>${icon("square-terminal")}Console &amp; network<span class="sp small faint">filtered on this device \xB7 no bodies, headers or query values</span></h2>
       <div class="lgbar"><div class="seg" role="tablist" aria-label="Log"><button role="tab" data-logtab="console" class="${logTab === "console" ? "on" : ""}" aria-selected="${logTab === "console"}">Console ${cons.length}${errs ? ` <span class="badge bad">${errs}</span>` : ""}</button><button role="tab" data-logtab="network" class="${logTab === "network" ? "on" : ""}" aria-selected="${logTab === "network"}">Network ${nets.length}${failed ? ` <span class="badge bad">${failed}</span>` : ""}</button></div>

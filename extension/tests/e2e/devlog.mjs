@@ -62,6 +62,13 @@ try {
   const off = await saveSession(seen);
   seen.push(off.id);
   ok('with the log off nothing is kept', (await logsOf(off.id)).length === 0);
+  const rvOff = await ctx.newPage();
+  await rvOff.goto(`chrome-extension://${keyInfo.id}/review.html?session=${off.id}`);
+  const why = await rvOff.waitForSelector('#devlog-empty', { timeout: 20000 }).then((e) => e.textContent()).catch(() => '');
+  ok('Review says the log was off for that recording and how to turn it on', /was off for this recording.*Settings/.test(why), why);
+  await rvOff.close();
+  await page.bringToFront();
+  await sleep(1500);
 
   // ---- switched on while armed
   await setSettings({ captureLogs: true });

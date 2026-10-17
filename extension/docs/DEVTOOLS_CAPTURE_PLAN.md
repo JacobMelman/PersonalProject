@@ -115,7 +115,7 @@ All filtering happens in the service worker **before anything is stored** (`src/
 * Unit (`tests/unit/devlog.test.ts`, `report.test.ts`, `policy.test.ts`): redaction patterns (including what must stay readable), URL
   cleaning, raw-entry validation and time windows, problem classification, the per-minute budget and recorder drop counts, HAR shape, report
   model and every renderer, ZIP contents and manifest hashes, the policy key.
-* E2E (`tests/e2e/devlog.mjs`, 38 checks incl. an axe audit of the new panel, part of `npm run test:e2e`): off by default (not injected, not registered, nothing kept);
+* E2E (`tests/e2e/devlog.mjs`, 39 checks incl. an axe audit of the new panel, part of `npm run test:e2e`): off by default (not injected, not registered, nothing kept);
   switching on mid-capture; console levels, secret redaction, uncaught error with stack, rejection, fetch 500 / POST / XHR 404 / unreachable
   host, a reused XHR object; query values, fragments, bodies and secrets never stored; reload covered (document request + new messages); Review panel, timeline rows,
   filter, seek; ZIP / HTML / TXT with the log and without it; policy off; flood cap with its system note; registration removed on disarm.

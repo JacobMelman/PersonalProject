@@ -123,7 +123,7 @@ async function createSession(kind: SessionKind, state: CaptureState, startedAt: 
   const rec: SessionRecord = {
     id: uid('s_'), kind, status: 'active', createdAt: Date.now(), startedAt, endedAt: null, lastCommittedAt: null,
     targetOrigin: state.targetOrigin, environment: settings.environment, browser: browserName(),
-    settingsSnapshot: { replaySec: settings.replaySec, tailSec: settings.tailSec, preSessionSec: settings.preSessionSec, fps: settings.fps, bitrateKbps: settings.bitrateKbps },
+    settingsSnapshot: { replaySec: settings.replaySec, tailSec: settings.tailSec, preSessionSec: settings.preSessionSec, fps: settings.fps, bitrateKbps: settings.bitrateKbps, captureLogs: settings.captureLogs },
     preContext: null,
   };
   await dbPut('sessions', rec);

@@ -105,7 +105,8 @@ export interface SessionRecord {
   targetOrigin: string | null;
   environment: string;
   browser: string;
-  settingsSnapshot: Pick<Settings, 'replaySec' | 'tailSec' | 'preSessionSec' | 'fps' | 'bitrateKbps'>;
+  /** captureLogs: whether the console & network log was on when the session was created (absent in older sessions). */
+  settingsSnapshot: Pick<Settings, 'replaySec' | 'tailSec' | 'preSessionSec' | 'fps' | 'bitrateKbps'> & { captureLogs?: boolean };
   preContext: { startWall: number; endWall: number; kept: boolean } | null;
   endReason?: string;
   /** Review classification of a Target Ended / recovered session. */

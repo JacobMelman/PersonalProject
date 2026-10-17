@@ -96,7 +96,7 @@ function render(): void {
       ${active && !shot && !repro && !term ? `<div class="meter"><div class="meter__head"><span>Rolling buffer</span><b>${ringSec}s of ${settings.replaySec}s</b></div><div class="meter__bar">${Array.from({ length: ticks }, (_, i) => `<i class="${i < on ? 'on' : ''}"></i>`).join('')}</div></div>` : ''}
       ${repro && !term ? `<div class="meter"><div class="meter__head"><span>This session</span><b>${state.markerCount} marker${state.markerCount === 1 ? '' : 's'} · ${shotCount} screenshot${shotCount === 1 ? '' : 's'}</b></div></div>` : ''}
     </div>
-    <div class="trust"><span class="chip">${icon('shield-check')}Local only</span><span class="chip">${icon('keyboard')}No keystrokes</span><span class="chip">${icon('monitor')}This tab only</span></div>`;
+    <div class="trust"><span class="chip">${icon('shield-check')}Local only</span><span class="chip">${icon('keyboard')}No keystrokes</span><span class="chip">${icon('monitor')}This tab only</span>${settings.captureLogs ? `<span class="chip" id="chip-logs">${icon('square-terminal')}Console &amp; network log</span>` : ''}</div>`;
 
     if (state.afk && state.afkNeedsResume) body += `<div class="section"><div class="actions">${tile('resumeFromAfk', 'play', 'Resume recording', 'You were away. The session does not restart on its own.', { primary: true })}</div></div>`;
     if (!active) {
